@@ -1,0 +1,512 @@
+# tdfextractor
+
+> Convert Bruker timsTOF `.d` folders into MS2, MGF, or mzML files, from the command
+> line or from Python. Version 0.4.0. MIT licensed.
+> Repo: https://github.com/tacular-omics/tdfextractor  PyPI: https://pypi.org/project/tdfextractor/
+
+This file is a self-contained usage guide for tools and agents that *use*
+tdfextractor. Developers working on the repo should read CLAUDE.md instead.
+
+## What it does
+
+A Bruker timsTOF acquisition is a `.d` folder holding `analysis.tdf` (SQLite
+metadata) and `analysis.tdf_bin` (compressed peaks). tdfextractor reads it through
+`tdfpy` and writes one of three open formats:
+
+| format | CLI | Python | acquisitions | contents |
+|---|---|---|---|---|
+| MS2 (`.ms2`) | `ms2-extractor` / `ms2-ex` | `write_ms2_file(Ms2Args)` | DDA-PASEF only | IP2-style header, one `S`/`I`/`Z` block per precursor |
+| MGF (`.mgf`) | `mgf-extractor` / `mgf-ex` | `write_mgf_file(MgfArgs)` | DDA-PASEF only | one `BEGIN IONS` block per precursor |
+| mzML (`.mzML`) | `mzml-extractor` / `mzml-ex` | `write_mzml_file(MzmlArgs)` | DDA, DIA, PRM | indexed mzML (psims), MS1 + MS2, centroided |
+
+Each DDA MS2 spectrum corresponds to one PASEF precursor: its peaks are summed over
+the precursor's PASEF scans and then filtered. DIA windows and PRM transitions (mzML
+only) are centroided with tdfpy using the `centroid_*` options.
+
+Running the MS2 or MGF writer on a DIA or PRM folder fails (the TDF has no
+`Precursors` table, or `generate_header` raises `TypeError: Unknown TDF format`).
+Use `mzml-extractor` for those.
+
+## Install
+
+```bash
+pip install tdfextractor
+pip install "tdfextractor[compression]"   # adds pynumpress + pyzstd for mzML
+                                          # numpress-* / zstd array compression
+```
+
+Requires Python >= 3.12. Runtime dependencies: tdfpy, serenipy, psims, numpy, pandas,
+tqdm, numba.
+
+Note on tdfpy: tdfextractor 0.4.0 declares `tdfpy>=1.2.0` without an upper bound but
+is written against the tdfpy 1.x API (tdfpy 2.0 changed centroiding, 3.0 removed
+`TimsData.readPasefMsMs`). If extraction fails with an AttributeError or an
+unexpected keyword from tdfpy, install `tdfpy<2` alongside tdfextractor 0.4.0, or use
+a tdfextractor release that caps tdfpy.
+
+## Quick start (CLI)
+
+```bash
+# One .d folder -> sample.d/sample.ms2 (output goes inside the .d folder by default)
+ms2-extractor /data/sample.d
+
+# IP2 preset, explicit output file
+ms2-ex /data/sample.d --ip2 -o /results/sample.ms2
+
+# Casanovo-ready MGF
+mgf-ex /data/sample.d --casanovo -o /results/sample.mgf
+
+# Every *.d folder in a directory, into an output directory, 4 folders at a time
+mgf-ex /data/run_folder -o /results/mgf --workers 4
+
+# mzML with MS1, zstd-compressed m/z arrays, 32-bit intensities
+mzml-ex /data/sample.d --mz-compression zstd --intensity-encoding 32
+
+# mzML, MS2 only, a 10-minute RT slice
+mzml-ex /data/sample.d --no-ms1 --min-precursor-rt 600 --max-precursor-rt 1200
+```
+
+## Quick start (Python)
+
+```python
+from tdfextractor import Ms2Args, MgfArgs, MzmlArgs
+from tdfextractor import write_ms2_file, write_mgf_file, write_mzml_file
+
+write_ms2_file(Ms2Args(
+    analysis_dir="/data/sample.d",
+    output_file="/results/sample.ms2",
+    min_precursor_charge=2,
+))
+
+write_mgf_file(MgfArgs(
+    analysis_dir="/data/sample.d",
+    output_file="/results/sample.mgf",
+    remove_precursor=True,
+    min_spectra_mz=50,
+    max_spectra_mz=2500,
+    min_spectra_intensity=0.01,      # 1 % of the spectrum's base peak
+))
+
+write_mzml_file(MzmlArgs(
+    analysis_dir="/data/dia_sample.d",
+    output_file="/results/dia_sample.mzML",
+    include_ms1=True,
+    mz_compression="zlib",
+    intensity_encoding=32,
+))
+```
+
+If `output_file` is `None`, the file is written inside the `.d` folder as
+`<stem>.ms2` / `<stem>.mgf` / `<stem>.mzML`. The writers overwrite an existing file
+without asking (the "skip if exists" behaviour belongs to the CLI).
+
+Iterate spectra without writing a file (DDA only):
+
+```python
+import itertools
+from tdfextractor import get_ms2_dda_spectra
+
+for spec in itertools.islice(
+    get_ms2_dda_spectra("/data/sample.d", min_precursor_charge=2, max_precursor_rt=2403.0),
+    5,
+):
+    print(spec.low_scan, spec.mz, spec.charge, spec.rt, spec.ccs, len(spec.mz_spectra))
+```
+
+Or build the filtered precursor table first and stream peaks for it:
+
+```python
+from tdfextractor import get_tdf_df, get_ms2_dda_content
+
+df = get_tdf_df("/data/sample.d", min_precursor_charge=2, max_precursor_mz=1200)
+print(len(df), df[["Id_Precursor", "MonoisotopicMz", "Charge", "Time", "CCS"]].head())
+for spec in get_ms2_dda_content("/data/sample.d", df, remove_precursor=True):
+    ...
+```
+
+## Public API
+
+Everything below is importable from `tdfextractor` (it is `tdfextractor.__all__`).
+
+### Type aliases
+
+- `EncodingBitWidth = Literal[32, 64]` — bit width for mzML binary arrays.
+- `CompressionName = Literal["none", "zlib", "zstd", "numpress-linear",
+  "numpress-slof", "numpress-pic"]` — mzML array compression. `zstd` needs `pyzstd`,
+  `numpress-*` need `pynumpress` (the `compression` extra).
+
+### `BaseExtractorArgs` (dataclass)
+
+Fields shared by all three writers. `None` on any min/max field means "no filter".
+
+| field | type | default | meaning |
+|---|---|---|---|
+| `analysis_dir` | `str` | required | path to one `.d` folder |
+| `output_file` | `str \| None` | `None` | output path; `None` = `<analysis_dir>/<stem>.<ext>` |
+| `remove_precursor` | `bool` | `False` | drop fragment peaks within ±`precursor_peak_width` of the precursor m/z |
+| `precursor_peak_width` | `float` | `2.0` | half-width in Da for `remove_precursor` |
+| `batch_size` | `int` | `100` | precursors read per batch |
+| `keep_empty_spectra` | `bool` | `False` | write spectra left with zero peaks after filtering |
+| `top_n_peaks` | `int \| None` | `None` | keep the N most intense peaks (see Gotchas) |
+| `min_spectra_intensity` | `float \| None` | `None` | fragment peak floor; `0.0-1.0` = fraction of base peak, `> 1.0` = absolute |
+| `max_spectra_intensity` | `float \| None` | `None` | fragment peak ceiling; same relative/absolute rule |
+| `min_spectra_mz`, `max_spectra_mz` | `float \| None` | `None` | fragment m/z range |
+| `min_precursor_intensity`, `max_precursor_intensity` | `float \| None` | `None` | precursor intensity range (absolute) |
+| `min_precursor_charge`, `max_precursor_charge` | `int \| None` | `None` | precursor charge range |
+| `min_precursor_mz`, `max_precursor_mz` | `float \| None` | `None` | precursor monoisotopic m/z range (DIA/PRM: isolation m/z) |
+| `min_precursor_rt`, `max_precursor_rt` | `float \| None` | `None` | retention time range in **seconds**; in mzML also bounds MS1 frames |
+| `min_precursor_ccs`, `max_precursor_ccs` | `float \| None` | `None` | precursor CCS range (Å², computed from 1/K0, charge and m/z) |
+| `min_precursor_neutral_mass`, `max_precursor_neutral_mass` | `float \| None` | `None` | precursor neutral mass range (Da) |
+
+Class method: `from_namespace(ns: argparse.Namespace) -> Self` builds an instance from
+a parsed CLI namespace. Namespace attributes are copied by field name; `ns.output`
+becomes `output_file`; CLI-only flags (`workers`, `verbose`, `overwrite`, `ip2`,
+`casanovo`) are ignored.
+
+### `Ms2Args(BaseExtractorArgs)` and `MgfArgs(BaseExtractorArgs)`
+
+Add two text-formatting fields:
+
+- `mz_precision: int = 5` — decimal places for fragment m/z.
+- `intensity_precision: int = 0` — decimal places for fragment intensity (and the MGF
+  `PEPMASS` intensity).
+
+### `MzmlArgs(BaseExtractorArgs)`
+
+| field | type | default | meaning |
+|---|---|---|---|
+| `include_ms1` | `bool` | `True` | write MS1 spectra (CLI: `--no-ms1` sets it False) |
+| `mz_compression` | `CompressionName` | `"zlib"` | m/z array compression |
+| `intensity_compression` | `CompressionName` | `"zlib"` | intensity array compression |
+| `mobility_compression` | `CompressionName` | `"zlib"` | MS1 per-peak ion mobility array compression |
+| `mz_encoding` | `EncodingBitWidth` | `64` | m/z float width |
+| `intensity_encoding` | `EncodingBitWidth` | `32` | intensity float width |
+| `centroid_mz_tolerance` | `float` | `8.0` | tdfpy centroiding m/z tolerance |
+| `centroid_mz_tolerance_type` | `str` | `"ppm"` | `"ppm"` or `"da"` |
+| `centroid_im_tolerance` | `float` | `0.05` | tdfpy centroiding ion mobility tolerance |
+| `centroid_im_tolerance_type` | `str` | `"relative"` | `"relative"` or `"absolute"` |
+| `centroid_min_peaks` | `int` | `5` | minimum raw peaks per centroid |
+| `centroid_noise_filter` | `str \| None` | `None` | `None`, `"mad"`, `"percentile"`, `"histogram"`, `"baseline"`, `"iterative_median"` |
+
+`MzmlArgs(...)` raises `ValueError("mz_encoding must be 32 or 64, got 16")` (and the
+same for `intensity_encoding`) on any other width. `MzmlArgs.from_namespace` also
+maps `--no-ms1` to `include_ms1=False` and `--centroid-noise-filter none` to `None`.
+
+Centroiding applies to MS1 frames (all acquisition types) and to DIA windows / PRM
+transitions. DDA MS2 spectra are not re-centroided.
+
+### Writers
+
+- `write_ms2_file(args: Ms2Args) -> None` — DDA only. Writes an IP2-style MS2 file:
+  `H` header lines recording every filter setting, then per precursor an `S` line
+  (`low_scan high_scan precursor_mz`), `I` lines (parent frame, precursor id,
+  intensity, ion mobility, CCS, RT, collision energy, isolation window, PASEF scans,
+  1/K0 range) and a `Z` line (`charge  M+H mass`). Scan numbers are IP2 scan numbers
+  (MS1 frames and their precursors numbered consecutively).
+- `write_mgf_file(args: MgfArgs) -> None` — DDA only. One block per precursor with
+  `TITLE=<stem>.<scan>.<scan>.<charge> File="<stem>", NativeID="merged=<precursor id>
+  frame=<parent frame> scanStart=.. scanEnd=.. scan=.."`, `RTINSECONDS`,
+  `PEPMASS=<precursor m/z> <precursor intensity>`, `CHARGE=<z>+`, then peaks.
+- `write_mzml_file(args: MzmlArgs) -> None` — detects DDA / DIA / PRM from the TDF and
+  writes an indexed mzML with psims. MS1 spectra carry a "mean inverse reduced ion
+  mobility array"; MS2 spectra carry isolation window, collision energy
+  (beam-type CID), "inverse reduced ion mobility" and, for DDA, precursor m/z,
+  intensity and charge plus a reference to the parent MS1 scan. Spectrum ids are
+  `scan=<n>`. Raises `TypeError` if the acquisition type cannot be determined.
+
+All three log progress with `logging` and show `tqdm` progress bars.
+
+### Lower-level DDA readers
+
+```python
+get_tdf_df(
+    analysis_dir: str,
+    min_precursor_intensity: float | None = None,
+    max_precursor_intensity: float | None = None,
+    min_precursor_charge: int | None = None,
+    max_precursor_charge: int | None = None,
+    min_precursor_mz: float | None = None,
+    max_precursor_mz: float | None = None,
+    min_precursor_rt: float | None = None,
+    max_precursor_rt: float | None = None,
+    min_precursor_ccs: float | None = None,
+    max_precursor_ccs: float | None = None,
+    min_precursor_neutral_mass: float | None = None,
+    max_precursor_neutral_mass: float | None = None,
+) -> pandas.DataFrame
+```
+
+One row per DDA precursor with a monoisotopic m/z and charge, after filtering.
+Columns include `Id_Precursor`, `MonoisotopicMz`, `Charge`, `Intensity`, `Parent`,
+`Id_Frame`, `Time` (s), `ScanNumBegin`, `ScanNumEnd`, `IsolationMz`,
+`IsolationWidth`, `CollisionEnergy`, `count` (PASEF scans), `IP2ScanNumber`,
+`NeutralMass`, `OOK0` (1/K0) and `CCS`. Positional argument order is exactly as
+above (the writers call it that way).
+
+```python
+get_ms2_dda_content(
+    analysis_dir: str,
+    merged_df: pandas.DataFrame,          # from get_tdf_df
+    remove_precursor: bool = False,
+    precursor_peak_width: float = 2.0,
+    batch_size: int = 100,
+    top_n_peaks: int | None = None,
+    min_spectra_intensity: float | None = None,
+    max_spectra_intensity: float | None = None,
+    min_spectra_mz: float | None = None,
+    max_spectra_mz: float | None = None,
+) -> Generator[serenipy.Ms2Spectra, None, None]
+```
+
+Yields one `serenipy.Ms2Spectra` per row of `merged_df`, peaks sorted by m/z,
+intensities as `int`. Attributes set: `low_scan`/`high_scan` (IP2 scan number), `mz`
+(precursor monoisotopic m/z), `mass` (M+H, singly protonated), `charge`,
+`mz_spectra`, `intensity_spectra`, `parent_id`, `precursor_id`, `prec_intensity`,
+`ook0`, `ccs`, `rt` (s), `ce`, `iso_width`, `iso_mz`, `scan_begin`, `scan_end`, and
+`info` (dict of the `I` line values).
+
+```python
+get_ms2_dda_spectra(analysis_dir: str, <all get_ms2_dda_content options>,
+                    <all get_tdf_df filters>) -> Generator[serenipy.Ms2Spectra, None, None]
+```
+
+`get_tdf_df` + `get_ms2_dda_content` in one call; every argument is keyword-capable
+with the same names and defaults as above.
+
+## CLI reference
+
+The three commands share every option except their format-specific flags. Behaviour
+common to all three:
+
+- `analysis_dir` is either a folder whose name ends in `.d` (processed alone) or a
+  directory whose `*.d` children are all processed (non-recursive).
+- `-o/--output`: if it ends in the format's extension (`.ms2`, `.mgf`, `.mzML` or
+  `.mzml`) it is a single output file, allowed only for one `.d` folder (otherwise a
+  `ValueError`). Anything else is treated as an output directory and created if
+  missing. With no `-o`, output goes inside each `.d` folder as `<stem>.<ext>`.
+- Existing output files are skipped with a warning unless `--overwrite`.
+- Each `.d` folder must contain `analysis.tdf` and `analysis.tdf_bin`.
+- An error inside one folder is logged and the next folder is processed; the process
+  still exits 0. Only a missing/invalid `analysis_dir`, a folder with no `.d`
+  children, or an output directory that cannot be created exit 1.
+- `--workers N` runs N `.d` folders in parallel threads in `mgf-extractor` only (and
+  only when there is more than one folder). The other two accept and ignore it.
+- `--mz-precision`/`--intensity-precision` affect MS2 and MGF text output; the mzML
+  writer ignores them.
+
+### ms2-extractor --help (verbatim)
+
+```
+usage: ms2-extractor [-h] [-o OUTPUT] [--remove-precursor]
+                     [--precursor-peak-width PRECURSOR_PEAK_WIDTH] [--batch-size BATCH_SIZE]
+                     [--top-n-peaks TOP_N_PEAKS] [--min-spectra-intensity MIN_SPECTRA_INTENSITY]
+                     [--max-spectra-intensity MAX_SPECTRA_INTENSITY]
+                     [--min-spectra-mz MIN_SPECTRA_MZ] [--max-spectra-mz MAX_SPECTRA_MZ]
+                     [--min-precursor-intensity MIN_PRECURSOR_INTENSITY]
+                     [--max-precursor-intensity MAX_PRECURSOR_INTENSITY]
+                     [--min-precursor-charge MIN_PRECURSOR_CHARGE]
+                     [--max-precursor-charge MAX_PRECURSOR_CHARGE]
+                     [--min-precursor-mz MIN_PRECURSOR_MZ] [--max-precursor-mz MAX_PRECURSOR_MZ]
+                     [--min-precursor-rt MIN_PRECURSOR_RT] [--max-precursor-rt MAX_PRECURSOR_RT]
+                     [--min-precursor-ccs MIN_PRECURSOR_CCS]
+                     [--max-precursor-ccs MAX_PRECURSOR_CCS]
+                     [--min-precursor-neutral-mass MIN_PRECURSOR_NEUTRAL_MASS]
+                     [--max-precursor-neutral-mass MAX_PRECURSOR_NEUTRAL_MASS]
+                     [--mz-precision MZ_PRECISION] [--intensity-precision INTENSITY_PRECISION]
+                     [--keep-empty-spectra] [-v] [--overwrite] [--workers WORKERS] [--ip2]
+                     analysis_dir
+
+Extract MS2 files from TimsTOF .D folders
+
+positional arguments:
+  analysis_dir          Path to the .D analysis directory
+
+options:
+  -h, --help            show this help message and exit
+  -o, --output OUTPUT   Output file path (default: <analysis_dir_name>.<ext>) (default: None)
+  --remove-precursor    Remove precursor peaks from MS/MS spectra (default: False)
+  --precursor-peak-width PRECURSOR_PEAK_WIDTH
+                        Width around precursor m/z to remove (Da) (default: 2.0)
+  --batch-size BATCH_SIZE
+                        Batch size for processing spectra (default: 100)
+  --top-n-peaks TOP_N_PEAKS
+                        Keep only top N most intense peaks per spectrum (default: None)
+  --min-spectra-intensity MIN_SPECTRA_INTENSITY
+                        Minimum intensity threshold for MS/MS peaks (absolute or relative when
+                        within [0.0-1.0] for percentage) (default: None)
+  --max-spectra-intensity MAX_SPECTRA_INTENSITY
+                        Maximum intensity threshold for MS/MS peaks (absolute or relative when
+                        within [0.0-1.0] for percentage) (default: None)
+  --min-spectra-mz MIN_SPECTRA_MZ
+                        Minimum m/z filter for MS/MS peaks (default: None)
+  --max-spectra-mz MAX_SPECTRA_MZ
+                        Maximum m/z filter for MS/MS peaks (default: None)
+  --min-precursor-intensity MIN_PRECURSOR_INTENSITY
+                        Minimum absolute precursor intensity filter (default: None)
+  --max-precursor-intensity MAX_PRECURSOR_INTENSITY
+                        Maximum absolute precursor intensity filter (default: None)
+  --min-precursor-charge MIN_PRECURSOR_CHARGE
+                        Minimum precursor charge state filter (default: None)
+  --max-precursor-charge MAX_PRECURSOR_CHARGE
+                        Maximum precursor charge state filter (default: None)
+  --min-precursor-mz MIN_PRECURSOR_MZ
+                        Minimum precursor m/z filter (default: None)
+  --max-precursor-mz MAX_PRECURSOR_MZ
+                        Maximum precursor m/z filter (default: None)
+  --min-precursor-rt MIN_PRECURSOR_RT
+                        Minimum precursor retention time filter (seconds) (default: None)
+  --max-precursor-rt MAX_PRECURSOR_RT
+                        Maximum precursor retention time filter (seconds) (default: None)
+  --min-precursor-ccs MIN_PRECURSOR_CCS
+                        Minimum precursor CCS filter (default: None)
+  --max-precursor-ccs MAX_PRECURSOR_CCS
+                        Maximum precursor CCS filter (default: None)
+  --min-precursor-neutral-mass MIN_PRECURSOR_NEUTRAL_MASS
+                        Minimum precursor neutral mass filter (default: None)
+  --max-precursor-neutral-mass MAX_PRECURSOR_NEUTRAL_MASS
+                        Maximum precursor neutral mass filter (default: None)
+  --mz-precision MZ_PRECISION
+                        Number of decimal places for m/z values (default: 5)
+  --intensity-precision INTENSITY_PRECISION
+                        Number of decimal places for intensity values (default: 0)
+  --keep-empty-spectra  Keep spectra with no peaks (default: False) (default: False)
+  -v, --verbose         Enable verbose logging (default: False)
+  --overwrite           Overwrite existing output file if it exists (default: False)
+  --workers WORKERS     Number of worker threads for processing spectra (default: 1) (default: 1)
+  --ip2                 Use IP2 Settings (default: False)
+```
+
+`mgf-extractor --help` is identical except the program name, the description
+("Extract MGF files from TimsTOF .D folders") and `--ip2` replaced by:
+
+```
+  --casanovo            Use Casanovo preset settings (optimized for de novo
+                        sequencing) (default: False)
+```
+
+`mzml-extractor --help` has no `--ip2`/`--casanovo`; its description is "Extract mzML
+files from TimsTOF .D folders (uses psims)" and it adds:
+
+```
+  --no-ms1              Skip MS1 spectra and write only MS2 PASEF spectra to the mzML file
+                        (default: False)
+  --mz-compression {none,zlib,zstd,numpress-linear,numpress-slof,numpress-pic}
+                        Compression for m/z arrays. zstd requires zstandard; numpress-* requires
+                        pynumpress. (default: zlib)
+  --intensity-compression {none,zlib,zstd,numpress-linear,numpress-slof,numpress-pic}
+                        Compression for intensity arrays. (default: zlib)
+  --mobility-compression {none,zlib,zstd,numpress-linear,numpress-slof,numpress-pic}
+                        Compression for the per-peak mean inverse reduced ion mobility array
+                        written alongside MS1 spectra. (default: zlib)
+  --mz-encoding {32,64}
+                        Bit width for m/z array values (default: 64). (default: 64)
+  --intensity-encoding {32,64}
+                        Bit width for intensity array values (default: 32). (default: 32)
+  --centroid-noise-filter {none,mad,percentile,histogram,baseline,iterative_median}
+                        Noise filter applied before centroiding. 'none' disables filtering
+                        (default); 'mad' uses median absolute deviation. (default: none)
+  --centroid-mz-tolerance CENTROID_MZ_TOLERANCE
+                        m/z tolerance for peak centroiding (default: 8.0). (default: 8.0)
+  --centroid-mz-tolerance-type {ppm,da}
+                        Unit for --centroid-mz-tolerance (default: ppm). (default: ppm)
+  --centroid-im-tolerance CENTROID_IM_TOLERANCE
+                        Ion mobility tolerance for peak centroiding (default: 0.05). (default:
+                        0.05)
+  --centroid-im-tolerance-type {relative,absolute}
+                        Unit for --centroid-im-tolerance (default: relative). (default: relative)
+  --centroid-min-peaks CENTROID_MIN_PEAKS
+                        Minimum number of raw peaks required to form a centroided peak (default:
+                        5). (default: 5)
+```
+
+### Presets
+
+Applied before the arguments are converted to a dataclass; an explicitly passed
+option wins over the preset value (with a warning), except where noted in Gotchas.
+
+- `--ip2` (ms2-extractor): `min_precursor_charge=2`, `top_n_peaks=500`.
+- `--casanovo` (mgf-extractor): `remove_precursor=True`, `precursor_peak_width=2.0`,
+  `top_n_peaks=150`, `min_spectra_intensity=0.01` (1 % of base peak),
+  `min_spectra_mz=50`, `max_spectra_mz=2500`, `min_precursor_charge=2`.
+
+## Example output
+
+MS2 (`ms2-ex sample.d --min-precursor-charge 2`, first spectrum):
+
+```
+H	Extractor	TimsTOF_extractor
+...
+H	MinPrecursorCharge	2
+...
+H	MonoIsotopic PrecMz	True
+S	2	2	1292.6370618858202
+I	TIMSTOF_Parent_ID	1
+I	TIMSTOF_Precursor_ID	1
+I	Intensity	3603
+I	Ion Mobility	1.3254
+I	CCS	533.7
+I	RetTime	2400.83
+I	Collision_Energy	68.0
+I	Isolation_Width	3.0
+I	Isolation_Mz	1293.3719
+I	Scan_Number_Begin	150
+I	Scan_Number_End	175
+I	Accumulation_Time	73.03
+I	Ramp_Time	73.03
+I	PASEF_Scans	6
+I	OOK0_Begin	1.346
+I	OOK0_End	1.3061
+Z	2	2584.2668473056406
+113.69137 14
+114.97429 14
+```
+
+MGF (same precursor):
+
+```
+BEGIN IONS
+TITLE=200ngHeLaPASEF_1min.2.2.2 File="200ngHeLaPASEF_1min", NativeID="merged=1 frame=1 scanStart=150 scanEnd=175 scan=2"
+RTINSECONDS=2400.83
+PEPMASS=1292.637062 3603
+CHARGE=2+
+113.69137 14
+114.97429 14
+...
+END IONS
+```
+
+## Gotchas
+
+- **MS2/MGF need DDA-PASEF data.** For DIA or PRM runs use `mzml-extractor`.
+- **Retention times are seconds** everywhere (filters, `RTINSECONDS`, `rt`). mzML
+  stores scan start time in minutes, as the format requires.
+- **Relative vs absolute intensity filters.** `min/max_spectra_intensity` values in
+  `[0.0, 1.0]` are fractions of the spectrum's most intense peak; `1.0` therefore
+  means "only the base peak", not "intensity >= 1". Use values above 1.0 for absolute
+  thresholds. From Python pass floats: the integer `1` raises `UnboundLocalError`.
+  Precursor intensity filters are always absolute.
+- **`top_n_peaks` does not currently trim DDA spectra** in 0.4.0 (MS2, MGF, and the
+  MS2 part of DDA mzML), including the top-N part of `--ip2` and `--casanovo`. Trim
+  downstream if you need it.
+- **`--casanovo` resets `--min-precursor-charge` to 2** unless
+  `--min-precursor-intensity` is also given.
+- `Ms2Spectra.mass` / the MS2 `Z` line is the singly protonated mass (M+H), not the
+  neutral mass. MGF `PEPMASS` is the precursor m/z.
+- Filters on precursor m/z use the monoisotopic m/z for DDA and the isolation window
+  centre for DIA/PRM. Charge, intensity, CCS and neutral-mass filters only apply to
+  DDA.
+- **Empty DIA/PRM MS2 spectra.** DIA windows and PRM transitions are centroided with
+  `centroid_min_peaks=5` by default; on sparse data every MS2 spectrum can come out
+  empty and be dropped, leaving an mzML with MS1 only. Lower it
+  (`--centroid-min-peaks 1`) or pass `--keep-empty-spectra`. (The bundled PRM test
+  file writes 0 MS2 spectra at the default and 85 at `min_peaks=1` for a 20 s window.)
+- For DIA/PRM mzML the `spectrumList count` attribute is the number of windows before
+  filtering, so it can exceed the number of `<spectrum>` elements actually written.
+  Count spectra rather than trusting the attribute.
+- A single `-o file.ext` with a directory of several `.d` folders raises
+  `ValueError`; pass an output directory instead.
+- The CLI exits 0 even when a folder failed; check the log for
+  `Error during ... extraction`.
+- Large runs: MS2/MGF stream spectra through a bounded queue, but `get_tdf_df` builds
+  the whole precursor table in memory first. mzML DDA extraction holds all MS2
+  spectra in memory before writing.

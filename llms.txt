@@ -1,0 +1,34 @@
+# tdfextractor
+
+> Convert Bruker timsTOF `.d` folders into MS2, MGF, or mzML files, from the command
+> line (`ms2-extractor`, `mgf-extractor`, `mzml-extractor`) or from Python
+> (`write_ms2_file`, `write_mgf_file`, `write_mzml_file`).
+
+tdfextractor reads raw TDF/PASEF data through `tdfpy` and writes files that search
+engines (IP2, MS-GF+, Comet) and de novo tools (Casanovo) read directly. It offers
+precursor filters (intensity, charge, m/z, RT, CCS, neutral mass), fragment-peak
+filters, precursor-peak removal, `--ip2` / `--casanovo` presets and batch processing
+of a directory of `.d` folders. MS2 and MGF output support DDA-PASEF only; mzML
+supports DDA, DIA and PRM and includes MS1 spectra with a per-peak ion mobility array.
+
+Each writer takes one typed dataclass (`Ms2Args`, `MgfArgs`, `MzmlArgs`):
+`from tdfextractor import Ms2Args, write_ms2_file; write_ms2_file(Ms2Args(analysis_dir="sample.d"))`.
+
+## Docs
+
+- [llms-full.txt](https://raw.githubusercontent.com/tacular-omics/tdfextractor/main/llms-full.txt): complete usage guide: every public function and dataclass, every CLI flag, examples, gotchas
+- [README](https://github.com/tacular-omics/tdfextractor/blob/main/README.md): installation, CLI usage, argument table
+- [CHANGELOG](https://github.com/tacular-omics/tdfextractor/blob/main/CHANGELOG.md): release notes, including the 0.4.0 migration to argument dataclasses
+
+## API
+
+- [tdfextractor/__init__.py](https://github.com/tacular-omics/tdfextractor/blob/main/src/tdfextractor/__init__.py): public exports
+- [args.py](https://github.com/tacular-omics/tdfextractor/blob/main/src/tdfextractor/args.py): `BaseExtractorArgs`, `Ms2Args`, `MgfArgs`, `MzmlArgs`, `EncodingBitWidth`, `CompressionName`
+- [utils.py](https://github.com/tacular-omics/tdfextractor/blob/main/src/tdfextractor/utils.py): `get_tdf_df`, `get_ms2_dda_content`, `get_ms2_dda_spectra`
+- [cli_args.py](https://github.com/tacular-omics/tdfextractor/blob/main/src/tdfextractor/cli_args.py): every CLI flag and the `--ip2` / `--casanovo` presets
+
+## Optional
+
+- [CLAUDE.md](https://github.com/tacular-omics/tdfextractor/blob/main/CLAUDE.md): guide for coding agents working on the repo itself
+- [tdfpy](https://github.com/tacular-omics/tdfpy): the timsTOF TDF reader tdfextractor is built on
+- [PyPI](https://pypi.org/project/tdfextractor/): package page
