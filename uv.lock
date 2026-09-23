@@ -694,7 +694,7 @@ compression = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "pynumpress" },
+    { name = "pynumpress", marker = "sys_platform != 'win32'" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pyupgrade" },
@@ -719,7 +719,7 @@ provides-extras = ["compression"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pynumpress", specifier = ">=0.0.9" },
+    { name = "pynumpress", marker = "sys_platform != 'win32'", specifier = ">=0.0.9" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=6.0" },
     { name = "pyupgrade", specifier = ">=3.21.0" },

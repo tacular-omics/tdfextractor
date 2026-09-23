@@ -4,8 +4,6 @@ ms2_extractor defines functions for generating ms2 files from DDA and PRM based 
 
 import logging
 import os
-import queue
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -15,7 +13,12 @@ from tqdm import tqdm
 
 from .args import Ms2Args
 from .cli_args import apply_preset_settings, create_ms2_parser, log_common_args
-from .utils import get_ms2_dda_content, get_tdf_df, map_precursor_to_ip2_scan_number
+from .utils import (
+    consume_in_foreground,
+    get_ms2_dda_content,
+    get_tdf_df,
+    map_precursor_to_ip2_scan_number,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -160,37 +163,26 @@ def write_ms2_file(args: Ms2Args) -> None:
     )
 
     logger.info("Generating Ms2 Spectra (producer-consumer mode)")
-    spectra_queue = queue.Queue(maxsize=100)
 
     def producer():
-        try:
-            ms2_spectra = get_ms2_dda_content(
-                analysis_dir=analysis_dir,
-                merged_df=merged_df,
-                remove_precursor=args.remove_precursor,
-                precursor_peak_width=args.precursor_peak_width,
-                batch_size=args.batch_size,
-                top_n_peaks=args.top_n_peaks,
-                min_spectra_intensity=args.min_spectra_intensity,
-                max_spectra_intensity=args.max_spectra_intensity,
-                min_spectra_mz=args.min_spectra_mz,
-                max_spectra_mz=args.max_spectra_mz,
-            )
-            for spectrum in ms2_spectra:
-                spectra_queue.put(spectrum)
-        finally:
-            spectra_queue.put(None)  # Sentinel value
+        return get_ms2_dda_content(
+            analysis_dir=analysis_dir,
+            merged_df=merged_df,
+            remove_precursor=args.remove_precursor,
+            precursor_peak_width=args.precursor_peak_width,
+            batch_size=args.batch_size,
+            top_n_peaks=args.top_n_peaks,
+            min_spectra_intensity=args.min_spectra_intensity,
+            max_spectra_intensity=args.max_spectra_intensity,
+            min_spectra_mz=args.min_spectra_mz,
+            max_spectra_mz=args.max_spectra_mz,
+        )
 
-    def consumer():
+    def consumer(spectra):
         with open(output_file, "w", encoding="UTF-8") as file:
             file.write(ms2_header)
             with tqdm(desc="Writing MS2 Spectra", unit="spectra", total=len(merged_df)) as pbar:
-                while True:
-                    ms2_spectra = spectra_queue.get()
-
-                    if ms2_spectra is None:
-                        break
-
+                for ms2_spectra in spectra:
                     pbar.update(1)
 
                     if len(ms2_spectra.mz_spectra) == 0 and args.keep_empty_spectra is False:
@@ -203,13 +195,7 @@ def write_ms2_file(args: Ms2Args) -> None:
                         )
                     )
 
-    producer_thread = threading.Thread(target=producer)
-    consumer_thread = threading.Thread(target=consumer)
-
-    producer_thread.start()
-    consumer_thread.start()
-    producer_thread.join()
-    consumer_thread.join()
+    consume_in_foreground(producer, consumer)
 
     total_time = round(time.time() - start_time, 2)
     logger.info(f"Total Time: {total_time:.2f} seconds")
@@ -292,6 +278,7 @@ def main() -> int | None:
 
         output_name = None
 
+    failed = 0
     for d_folder in d_folders:
         if not d_folder.is_dir():
             logger.error(f"Path is not a directory: {d_folder}")
@@ -322,11 +309,17 @@ def main() -> int | None:
             write_ms2_file(base_args)
             logger.info("MS2 extraction completed successfully!")
         except Exception as e:
+            failed += 1
             logger.error(f"Error during Ms2 extraction: {e}... skipping {d_folder}")
             logger.error(e, exc_info=True)
         except KeyboardInterrupt:
             logger.info("Extraction interrupted by user.")
             os._exit(0)
+
+    if failed:
+        logger.error(f"{failed} of {len(d_folders)} .d folder(s) failed")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

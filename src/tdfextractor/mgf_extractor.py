@@ -5,8 +5,6 @@ ms2_extractor defines functions for generating ms2 files from DDA and PRM based 
 import argparse
 import logging
 import os
-import queue
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -15,7 +13,7 @@ from tqdm import tqdm
 
 from .args import MgfArgs
 from .cli_args import apply_preset_settings, create_mgf_parser, log_common_args
-from .utils import get_ms2_dda_content, get_tdf_df
+from .utils import consume_in_foreground, get_ms2_dda_content, get_tdf_df
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +24,6 @@ def write_mgf_file(args: MgfArgs) -> None:
 
     analysis_dir = args.analysis_dir
     output_file = args.output_file or (str(Path(analysis_dir) / Path(analysis_dir).stem) + ".mgf")
-
-    spectra_queue = queue.Queue(maxsize=100)
 
     merged_df = get_tdf_df(
         analysis_dir,
@@ -46,25 +42,20 @@ def write_mgf_file(args: MgfArgs) -> None:
     )
 
     def producer():
-        try:
-            ms2_spectra = get_ms2_dda_content(
-                analysis_dir=analysis_dir,
-                merged_df=merged_df,
-                remove_precursor=args.remove_precursor,
-                precursor_peak_width=args.precursor_peak_width,
-                batch_size=args.batch_size,
-                top_n_peaks=args.top_n_peaks,
-                min_spectra_intensity=args.min_spectra_intensity,
-                max_spectra_intensity=args.max_spectra_intensity,
-                min_spectra_mz=args.min_spectra_mz,
-                max_spectra_mz=args.max_spectra_mz,
-            )
-            for spectrum in ms2_spectra:
-                spectra_queue.put(spectrum)
-        finally:
-            spectra_queue.put(None)  # Sentinel value
+        return get_ms2_dda_content(
+            analysis_dir=analysis_dir,
+            merged_df=merged_df,
+            remove_precursor=args.remove_precursor,
+            precursor_peak_width=args.precursor_peak_width,
+            batch_size=args.batch_size,
+            top_n_peaks=args.top_n_peaks,
+            min_spectra_intensity=args.min_spectra_intensity,
+            max_spectra_intensity=args.max_spectra_intensity,
+            min_spectra_mz=args.min_spectra_mz,
+            max_spectra_mz=args.max_spectra_mz,
+        )
 
-    def consumer():
+    def consumer(spectra):
         logger.info("Writing Contents To File")
         with open(output_file, "w", encoding="UTF-8") as file:
             with tqdm(desc="Writing MGF File", unit="spectra", total=len(merged_df)) as pbar:
@@ -73,11 +64,7 @@ def write_mgf_file(args: MgfArgs) -> None:
                 header_lines.append("INSTRUMENT=TimsTOF")
                 header_lines.append("MASS=Mono")
 
-                while True:
-                    spectrum = spectra_queue.get()
-                    if spectrum is None:
-                        break
-
+                for spectrum in spectra:
                     pbar.update(1)
 
                     if len(spectrum.mz_spectra) == 0 and args.keep_empty_spectra is False:
@@ -103,13 +90,7 @@ def write_mgf_file(args: MgfArgs) -> None:
                     mgf_lines.append("END IONS")
                     file.write("\n".join(mgf_lines) + "\n\n")
 
-    producer_thread = threading.Thread(target=producer)
-    consumer_thread = threading.Thread(target=consumer)
-
-    producer_thread.start()
-    consumer_thread.start()
-    producer_thread.join()
-    consumer_thread.join()
+    consume_in_foreground(producer, consumer)
 
     total_time = round(time.time() - start_time, 2)
     logger.info(f"Total Time: {total_time:.2f} seconds")
@@ -270,14 +251,19 @@ def main() -> int | None:
         logger.info(f"Processing completed: {successful_count} successful, {failed_count} failed")
     else:
         # Process sequentially (original behavior)
+        failed_count = 0
         for d_folder in d_folders:
             try:
-                success = process_single_d_folder(d_folder, args, output_dir, output_name)
-                if not success:
-                    continue
+                if not process_single_d_folder(d_folder, args, output_dir, output_name):
+                    failed_count += 1
             except KeyboardInterrupt:
                 logger.info("\nExtraction interrupted by user.")
                 os._exit(0)
+
+    if failed_count:
+        logger.error(f"{failed_count} of {len(d_folders)} .d folder(s) failed")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

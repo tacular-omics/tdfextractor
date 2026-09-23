@@ -308,7 +308,17 @@ def add_mzml_specific_args(parser: argparse.ArgumentParser) -> None:
         "--centroid-min-peaks",
         type=int,
         default=5,
-        help="Minimum number of raw peaks required to form a centroided peak (default: 5).",
+        help="Minimum number of raw peaks required to form a centroided MS1 peak (default: 5).",
+    )
+    parser.add_argument(
+        "--centroid-ms2-min-peaks",
+        type=int,
+        default=1,
+        help=(
+            "Minimum number of raw peaks required to form a centroided peak in DIA "
+            "windows and PRM transitions (default: 1). These span few mobility scans, "
+            "so higher values can empty most MS2 spectra."
+        ),
     )
 
 
@@ -404,14 +414,14 @@ def apply_preset_settings(logger: logging.Logger, args: argparse.Namespace) -> N
 
         if args.max_spectra_mz is not None:
             logger.warning(
-                f"Casanovo preset overroverriddeniden... setting max_spectra_mz to {args.max_spectra_mz}"
+                f"Casanovo preset overridden... setting max_spectra_mz to {args.max_spectra_mz}"
             )
         else:
             args.max_spectra_mz = 2500
 
-        if args.min_precursor_intensity is not None:
+        if args.min_precursor_charge is not None:
             logger.warning(
-                f"Casanovo preset overridden... setting min_precursor_intensity to {args.min_precursor_intensity}"
+                f"Casanovo preset overridden... setting min_precursor_charge to {args.min_precursor_charge}"
             )
         else:
             args.min_precursor_charge = 2

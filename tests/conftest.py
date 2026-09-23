@@ -114,6 +114,27 @@ def mzml_prm_output(tmp_path_factory, prm_d_folder: Path) -> Path:
 
 
 @pytest.fixture(scope="session")
+def mzml_prm_default_output(tmp_path_factory, prm_d_folder: Path) -> Path:
+    """PRM slice written with default centroid settings.
+
+    The bundled PRM file is very sparse (~260 raw peaks per frame), so its MS1
+    frames centroid to nothing at the default ``centroid_min_peaks=5``; the MS2
+    transitions must still come through.
+    """
+    out_dir = tmp_path_factory.mktemp("mzml_prm_default")
+    out = out_dir / (prm_d_folder.stem + "_default.mzML")
+    write_mzml_file(
+        MzmlArgs(
+            analysis_dir=str(prm_d_folder),
+            output_file=str(out),
+            min_precursor_rt=PRM_MIN_RT,
+            max_precursor_rt=PRM_MAX_RT,
+        )
+    )
+    return out
+
+
+@pytest.fixture(scope="session")
 def mzml_dia_no_ms1_output(tmp_path_factory, dia_d_folder: Path) -> Path:
     """include_ms1=False variant on the small DIA fixture (cheap)."""
     out_dir = tmp_path_factory.mktemp("mzml_dia_no_ms1")

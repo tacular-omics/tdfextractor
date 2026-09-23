@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+### Added
+- `MzmlArgs.centroid_ms2_min_peaks` / `--centroid-ms2-min-peaks` (default 1):
+  minimum raw peaks per centroid for DIA windows and PRM transitions.
+  `centroid_min_peaks` (default 5) now applies to MS1 frames only.
+
+### Fixed
+- `top_n_peaks` never trimmed DDA spectra (the trimming branch was unreachable),
+  so `--top-n-peaks` and the top-N part of `--ip2` / `--casanovo` did nothing in
+  MS2, MGF and DDA mzML output. `top_n_peaks=0` now empties spectra; negative
+  values raise `ValueError`.
+- `--casanovo` overwrote an explicit `--min-precursor-charge` with 2 (it checked
+  `--min-precursor-intensity` instead).
+- An integer `min_spectra_intensity` / `max_spectra_intensity` of 0 or 1 raised
+  `UnboundLocalError`. Values in `[0, 1]` are now relative whether `int` or `float`.
+- DIA/PRM mzML declared a `spectrumList count` from the unfiltered window count,
+  more than the spectra actually written.
+- DIA/PRM MS2 windows were centroided with `centroid_min_peaks=5`, which emptied
+  most DIA windows and every transition of the bundled PRM file (0 MS2 spectra).
+- The CLIs exited 0 when a `.d` folder failed; they now exit 1 if any folder failed.
+- `write_ms2_file` / `write_mgf_file` swallowed exceptions raised while reading
+  spectra (in the producer thread) and returned normally with a truncated file;
+  they now re-raise them.
+
 ## [0.4.1]
 ### Added
 - Archived on Zenodo (`CITATION.cff`, `.zenodo.json`).

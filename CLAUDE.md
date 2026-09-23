@@ -30,8 +30,8 @@ Run from the repo root (checked with the repo's own `uv.lock`, Python 3.13):
 
 ```bash
 just install        # uv sync (dev group: pytest, ruff, ty, pynumpress, pyzstd)
-just test           # uv run pytest tests/ -v          (49 tests, ~10 s)
-just testf          # uv run pytest tests/ -v -m "not slow"   (29 fast tests, <1 s)
+just test           # uv run pytest tests/ -v          (77 tests, ~15 s)
+just testf          # uv run pytest tests/ -v -m "not slow"   (46 fast tests, ~2 s)
 just test-cov       # pytest with branch coverage (term + html + xml)
 just lint           # uv run ruff check src/ tests/
 just format         # ruff isort + F401 fix + ruff format on src/ tests/
@@ -80,7 +80,8 @@ tests/
                      #   an RT-bounded slice of the bundled .d files
   data/              # 200ngHeLaPASEF_1min.d (DDA, 60 MB), example_dia.d (11 MB),
                      #   example_prm.d (29 MB), committed to git
-  test_args.py, test_ms2_extractor.py, test_mgf_extractor.py, test_mzml_extractor.py
+  test_args.py, test_cli.py, test_utils.py, test_ms2_extractor.py,
+  test_mgf_extractor.py, test_mzml_extractor.py
 benchmark_workers.py # ad-hoc MGF --workers benchmark, not packaged; currently broken
                      #   (imports src.tdfextractor.mgf_exctractor, which does not exist)
 ```
@@ -145,7 +146,7 @@ Everything in `tdfextractor.__all__`:
 - Tests: pytest, fixtures in `tests/conftest.py`. End-to-end tests carry
   `@pytest.mark.slow` and reuse the session-scoped output fixtures; keep new
   extraction tests on those fixtures and keep RT windows tight (see `DDA_MAX_RT`,
-  `DIA_MAX_RT`, `PRM_MIN_RT`/`PRM_MAX_RT` in `conftest.py`) so the suite stays around 10 s.
+  `DIA_MAX_RT`, `PRM_MIN_RT`/`PRM_MAX_RT` in `conftest.py`) so the suite stays around 15 s.
 
 ## Gotchas
 
@@ -153,25 +154,21 @@ Everything in `tdfextractor.__all__`:
   `Precursors` table. DIA/PRM input only works with `mzml-extractor`. The module
   docstring of `ms2_extractor.py` / `mgf_extractor.py` says "DDA and PRM"; that is
   not true.
-- **CLI failures exit 0.** Each `main()` logs an exception per `.d` folder and
-  continues; only argument/path validation errors return 1.
+- **CLI exit codes.** Each `main()` logs an exception per `.d` folder and continues
+  with the next one, then returns 1 if any folder failed (0 otherwise).
 - **`--workers` only does anything in `mgf-extractor`**, and only with more than one
   `.d` folder (one thread per folder). `ms2-extractor` and `mzml-extractor` accept the
   flag and ignore it.
 - **`--min/--max-spectra-intensity` in `[0.0, 1.0]` are relative** (fraction of the
-  spectrum's max peak), above 1.0 absolute. Passing the Python `int` `1` to the API
-  raises `UnboundLocalError` (neither branch matches).
-- **`top_n_peaks` currently has no effect** in `get_ms2_dda_content` (the trimming
-  branch is unreachable), so `--top-n-peaks`, `--ip2` and `--casanovo`'s top-N do not
-  trim DDA spectra. Verified on 0.4.1 / tdfpy 4.0.2: `top_n_peaks=5` still yields a 4292-peak first
-  spectrum.
-- **`--casanovo` overwrites `--min-precursor-charge` with 2** unless
-  `--min-precursor-intensity` is set (the preset checks the wrong field).
-- **DIA/PRM centroiding drops sparse MS2.** With the default `centroid_min_peaks=5`
-  the bundled PRM file yields 0 MS2 spectra (85 with `min_peaks=1`); the PRM test
-  fixture sets `centroid_min_peaks=1` for this reason. Also, `_write_dia_or_prm`
-  declares `spectrum_list(count=...)` from the unfiltered window count, so the mzML
-  `spectrumList count` can exceed the spectra actually written.
+  spectrum's max peak), above 1.0 absolute, whether `int` or `float`
+  (`_resolve_intensity_threshold`).
+- **MS1 and MS2 centroiding differ.** `centroid_min_peaks` (default 5) applies to MS1
+  frames; DIA windows and PRM transitions use `centroid_ms2_min_peaks` (default 1),
+  because they span few mobility scans and 5 empties most of them. The bundled PRM
+  file is so sparse that its MS1 frames centroid to nothing at 5, so the
+  `mzml_prm_output` fixture sets `centroid_min_peaks=1`.
+- `_write_dia_or_prm` plans every spectrum (centroiding each MS2 window once to drop
+  empty ones) before writing, because psims writes `spectrumList count` up front.
 - `Ms2Spectra.mass` is the singly protonated mass (M+H, `calculate_p1mass`); MGF
   `PEPMASS` is the precursor m/z.
 - **tdfpy API breaks across majors.** tdfpy 2.0 replaced the flat `centroid()` kwargs
