@@ -1,6 +1,20 @@
 # tdfextractor
 
-A Python package to extract MS/MS spectra from Bruker TimsTOF .D folders and convert them to standard formats (MS2, MGF, and mzML).
+[![Python Package](https://github.com/tacular-omics/tdfextractor/actions/workflows/python-package.yml/badge.svg)](https://github.com/tacular-omics/tdfextractor/actions/workflows/python-package.yml)
+[![PyPI](https://img.shields.io/pypi/v/tdfextractor)](https://pypi.org/project/tdfextractor/)
+[![License](https://img.shields.io/github/license/tacular-omics/tdfextractor)](https://github.com/tacular-omics/tdfextractor/blob/main/LICENSE)
+[![Python](https://img.shields.io/pypi/pyversions/tdfextractor)](https://pypi.org/project/tdfextractor/)
+
+Converts Bruker timsTOF `.d` folders into MS2, MGF, or mzML files that downstream search engines and de novo sequencing tools already know how to read. It's built on [tdfpy](https://github.com/tacular-omics/tdfpy) for the raw PASEF data access, so you get filtering, precursor handling, and batch processing without writing any Bruker SDK code yourself.
+
+## Highlights
+
+- **Three output formats** — MS2 (MS-GF+, Comet), MGF (general-purpose, Casanovo-tuned), and mzML (includes MS1 and MS2 PASEF spectra with configurable compression/encoding).
+- **Built-in presets** — `--ip2` for IP2 search engine defaults, `--casanovo` for de novo sequencing defaults.
+- **Extensive spectrum and precursor filtering** — intensity, m/z, charge, retention time, CCS, and neutral mass thresholds, plus optional precursor peak removal and top-N peak trimming.
+- **Batch processing** — point at a directory of `.d` folders and process them with multiple `--workers`.
+- **mzML centroiding and compression controls** — choose noise filters, m/z/ion-mobility tolerances, and per-array compression (`zlib`, `zstd`, `numpress-*`).
+- **Also usable as a library** — `write_ms2_file`, `write_mgf_file`, and `write_mzml_file` take the same typed argument dataclasses as the CLI.
 
 ## Installation
 
@@ -10,7 +24,7 @@ pip install tdfextractor
 
 ## Usage
 
-tdfextractor provides two command-line tools for extracting spectra:
+tdfextractor provides three command-line tools for extracting spectra:
 
 ### MS2 Extraction
 Extract MS2 format files (compatible with MS-GF+, Comet, etc.):
@@ -136,3 +150,25 @@ mgf-ex /path/to/directory_with_multiple_d_folders --workers 4
 ```
 
 **Note**: Workers only affect processing when multiple .d folders are being processed simultaneously. Each worker processes one complete .d folder independently.
+
+## Python API
+
+Every extractor is also importable as a function, driven by the same typed argument dataclass the CLI builds internally:
+
+```python
+from tdfextractor import Ms2Args, write_ms2_file
+
+args = Ms2Args(
+    analysis_dir="/path/to/sample.d",
+    output_file="sample.ms2",
+    min_precursor_charge=2,
+    top_n_peaks=500,
+)
+write_ms2_file(args)
+```
+
+`MgfArgs` and `write_mgf_file` / `MzmlArgs` and `write_mzml_file` follow the same pattern. `BaseExtractorArgs` documents the fields shared by all three.
+
+## License
+
+[MIT](https://github.com/tacular-omics/tdfextractor/blob/main/LICENSE)
