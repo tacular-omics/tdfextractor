@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [0.4.2] - 2026-09-23
 ### Added
 - `MzmlArgs.centroid_ms2_min_peaks` / `--centroid-ms2-min-peaks` (default 1):
   minimum raw peaks per centroid for DIA windows and PRM transitions.
