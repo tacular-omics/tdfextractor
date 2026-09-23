@@ -1,7 +1,7 @@
 # tdfextractor
 
 > Convert Bruker timsTOF `.d` folders into MS2, MGF, or mzML files, from the command
-> line or from Python. Version 0.4.0. MIT licensed.
+> line or from Python. Version 0.4.1. MIT licensed.
 > Repo: https://github.com/tacular-omics/tdfextractor  PyPI: https://pypi.org/project/tdfextractor/
 
 This file is a self-contained usage guide for tools and agents that *use*
@@ -19,8 +19,9 @@ metadata) and `analysis.tdf_bin` (compressed peaks). tdfextractor reads it throu
 | MGF (`.mgf`) | `mgf-extractor` / `mgf-ex` | `write_mgf_file(MgfArgs)` | DDA-PASEF only | one `BEGIN IONS` block per precursor |
 | mzML (`.mzML`) | `mzml-extractor` / `mzml-ex` | `write_mzml_file(MzmlArgs)` | DDA, DIA, PRM | indexed mzML (psims), MS1 + MS2, centroided |
 
-Each DDA MS2 spectrum corresponds to one PASEF precursor: its peaks are summed over
-the precursor's PASEF scans and then filtered. DIA windows and PRM transitions (mzML
+Each DDA MS2 spectrum corresponds to one PASEF precursor: its peaks come from
+tdfpy's `get_mobility_collapsed_spectrum` over the precursor's PASEF frame and scan
+range, and are then filtered. DIA windows and PRM transitions (mzML
 only) are centroided with tdfpy using the `centroid_*` options.
 
 Running the MS2 or MGF writer on a DIA or PRM folder fails (the TDF has no
@@ -38,11 +39,10 @@ pip install "tdfextractor[compression]"   # adds pynumpress + pyzstd for mzML
 Requires Python >= 3.12. Runtime dependencies: tdfpy, serenipy, psims, numpy, pandas,
 tqdm, numba.
 
-Note on tdfpy: tdfextractor 0.4.0 declares `tdfpy>=1.2.0` without an upper bound but
-is written against the tdfpy 1.x API (tdfpy 2.0 changed centroiding, 3.0 removed
-`TimsData.readPasefMsMs`). If extraction fails with an AttributeError or an
-unexpected keyword from tdfpy, install `tdfpy<2` alongside tdfextractor 0.4.0, or use
-a tdfextractor release that caps tdfpy.
+Note on tdfpy: tdfextractor 0.4.1 requires `tdfpy>=4.0,<5` and uses the tdfpy 4 API.
+tdfextractor 0.4.0 declared an uncapped `tdfpy>=1.2.0` but only works with tdfpy 1.x;
+if you are stuck on 0.4.0, install `tdfpy<2` next to it. Peak lists from 0.4.1 differ
+from 0.4.0 output for the same file (tdfpy 4 reads MS2 peaks differently).
 
 ## Quick start (CLI)
 
@@ -182,15 +182,17 @@ Add two text-formatting fields:
 | `mz_encoding` | `EncodingBitWidth` | `64` | m/z float width |
 | `intensity_encoding` | `EncodingBitWidth` | `32` | intensity float width |
 | `centroid_mz_tolerance` | `float` | `8.0` | tdfpy centroiding m/z tolerance |
-| `centroid_mz_tolerance_type` | `str` | `"ppm"` | `"ppm"` or `"da"` |
+| `centroid_mz_tolerance_type` | `Literal["ppm", "da"]` | `"ppm"` | `"ppm"` or `"da"` |
 | `centroid_im_tolerance` | `float` | `0.05` | tdfpy centroiding ion mobility tolerance |
-| `centroid_im_tolerance_type` | `str` | `"relative"` | `"relative"` or `"absolute"` |
+| `centroid_im_tolerance_type` | `Literal["relative", "absolute"]` | `"relative"` | `"relative"` or `"absolute"` |
 | `centroid_min_peaks` | `int` | `5` | minimum raw peaks per centroid |
 | `centroid_noise_filter` | `str \| None` | `None` | `None`, `"mad"`, `"percentile"`, `"histogram"`, `"baseline"`, `"iterative_median"` |
 
 `MzmlArgs(...)` raises `ValueError("mz_encoding must be 32 or 64, got 16")` (and the
 same for `intensity_encoding`) on any other width. `MzmlArgs.from_namespace` also
 maps `--no-ms1` to `include_ms1=False` and `--centroid-noise-filter none` to `None`.
+Any other `centroid_noise_filter` string is only rejected when the file is written:
+`write_mzml_file` raises `ValueError("Unknown centroid noise filter 'foo'; ...")`.
 
 Centroiding applies to MS1 frames (all acquisition types) and to DIA windows / PRM
 transitions. DDA MS2 spectra are not re-centroided.
@@ -457,8 +459,8 @@ I	PASEF_Scans	6
 I	OOK0_Begin	1.346
 I	OOK0_End	1.3061
 Z	2	2584.2668473056406
-113.69137 14
-114.97429 14
+107.99411 14
+118.27348 96
 ```
 
 MGF (same precursor):
@@ -469,8 +471,8 @@ TITLE=200ngHeLaPASEF_1min.2.2.2 File="200ngHeLaPASEF_1min", NativeID="merged=1 f
 RTINSECONDS=2400.83
 PEPMASS=1292.637062 3603
 CHARGE=2+
-113.69137 14
-114.97429 14
+107.99411 14
+118.27348 96
 ...
 END IONS
 ```
@@ -485,7 +487,7 @@ END IONS
   means "only the base peak", not "intensity >= 1". Use values above 1.0 for absolute
   thresholds. From Python pass floats: the integer `1` raises `UnboundLocalError`.
   Precursor intensity filters are always absolute.
-- **`top_n_peaks` does not currently trim DDA spectra** in 0.4.0 (MS2, MGF, and the
+- **`top_n_peaks` does not currently trim DDA spectra** in 0.4.1 (MS2, MGF, and the
   MS2 part of DDA mzML), including the top-N part of `--ip2` and `--casanovo`. Trim
   downstream if you need it.
 - **`--casanovo` resets `--min-precursor-charge` to 2** unless

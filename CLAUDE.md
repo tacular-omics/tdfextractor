@@ -9,8 +9,9 @@ dataclasses.
 
 Place in the tacular-omics graph:
 
-- **Upstream:** `tdfpy` (raw TDF/PASEF access, `PandasTdf`, `timsdata_connect`,
-  `DDA`/`DIA`/`PRM` readers, centroiding). Also `serenipy` (the `Ms2Spectra`
+- **Upstream:** `tdfpy>=4.0,<5` (raw TDF/PASEF access, `PandasTdf`, `timsdata_connect`,
+  `get_mobility_collapsed_spectrum`, `DDA`/`DIA`/`PRM` readers, `MergePeaksCentroider`
+  and the `NoiseSpec` threshold classes). Also `serenipy` (the `Ms2Spectra`
   record and MS2 serialization) and `psims` (mzML writer). None of these is
   vendored.
 - **Downstream:** none in the org. It is an end-user tool.
@@ -89,7 +90,9 @@ Data flow for MS2/MGF (DDA only):
 1. `get_tdf_df` merges `Precursors` x `Frames` x `PasefFrameMsMsInfo` (one row per
    precursor), drops rows with no `MonoisotopicMz`/`Charge`, adds `NeutralMass`,
    `IP2ScanNumber`, `OOK0` and `CCS`, and applies every `*_precursor_*` filter.
-2. `get_ms2_dda_content` reads each precursor's MS2 peaks in batches, applies the
+2. `get_ms2_dda_content` reads each precursor's MS2 peaks in batches (one
+   `tdfpy.get_mobility_collapsed_spectrum(td, [(frame, scan_begin, scan_end)])` call
+   per precursor, on the single PASEF window kept per precursor), applies the
    `*_spectra_*` filters, optional precursor-peak removal and top-N, sorts by m/z, and
    yields `serenipy.Ms2Spectra`.
 3. The writer runs a producer thread (step 2) and a consumer thread (file writing)
@@ -98,7 +101,9 @@ Data flow for MS2/MGF (DDA only):
 mzML: `write_mzml_file` reads `PandasTdf` flags and dispatches to `_write_dda`
 (MS1 via `tdfpy.DDA`, MS2 via `get_ms2_dda_content`) or `_write_dia_or_prm`
 (`tdfpy.DIA` windows / `tdfpy.PRM` transitions, centroided with the `centroid_*`
-fields). MS1 spectra carry a per-peak "mean inverse reduced ion mobility array".
+fields, which `_build_centroid_kwargs` turns into `centroid=MergePeaksCentroider(...)`
+plus `noise=` one of `MadThreshold`/`PercentileThreshold`/`HistogramThreshold`/
+`BaselineThreshold`/`IterativeMedianThreshold` or `None`). MS1 spectra carry a per-peak "mean inverse reduced ion mobility array".
 `--min/--max-precursor-rt` bound the MS1 frames as well as the MS2 spectra.
 
 ## Public API
@@ -158,7 +163,8 @@ Everything in `tdfextractor.__all__`:
   raises `UnboundLocalError` (neither branch matches).
 - **`top_n_peaks` currently has no effect** in `get_ms2_dda_content` (the trimming
   branch is unreachable), so `--top-n-peaks`, `--ip2` and `--casanovo`'s top-N do not
-  trim DDA spectra. Verified: `top_n_peaks=5` still yields 1782-peak spectra.
+  trim DDA spectra. Verified on 0.4.1 / tdfpy 4.0.2: `top_n_peaks=5` still yields a 4292-peak first
+  spectrum.
 - **`--casanovo` overwrites `--min-precursor-charge` with 2** unless
   `--min-precursor-intensity` is set (the preset checks the wrong field).
 - **DIA/PRM centroiding drops sparse MS2.** With the default `centroid_min_peaks=5`
@@ -168,13 +174,14 @@ Everything in `tdfextractor.__all__`:
   `spectrumList count` can exceed the spectra actually written.
 - `Ms2Spectra.mass` is the singly protonated mass (M+H, `calculate_p1mass`); MGF
   `PEPMASS` is the precursor m/z.
-- **tdfpy API breaks.** tdfpy 2.0 replaced the flat `centroid()` kwargs with
-  `Centroider`/`NoiseSpec` objects and 3.0 removed `TimsData.readPasefMsMs` (Bruker's
-  libtimsdata). The code on main uses the old APIs and works only with the tdfpy
-  pinned in `uv.lock` (1.2.0); `pyproject.toml` has an uncapped `tdfpy>=1.2.0`, so a
-  plain `pip install tdfextractor` can pull a tdfpy it cannot run with. The 0.4.1
-  release branch moves to `tdfpy>=4.0,<5`. Check the tdfpy version in `uv.lock`
-  before trusting any tdfpy call you read here.
+- **tdfpy API breaks across majors.** tdfpy 2.0 replaced the flat `centroid()` kwargs
+  with centroider/`NoiseSpec` objects and 3.0 removed Bruker's libtimsdata
+  (`TimsData.readPasefMsMs`, `extractCentroidedSpectrumForFrame`). Since 0.4.1 the
+  code targets tdfpy 4 (`pyproject.toml`: `tdfpy>=4.0,<5`; `uv.lock`: 4.0.2) and
+  uses `get_mobility_collapsed_spectrum` for DDA/PRM MS2 peaks. Peak lists differ from
+  0.4.0 output (e.g. the first bundled DDA spectrum went from 1782 to 4292 peaks), so
+  don't compare against files written by older versions. Do not raise the cap without
+  running the full test suite on the new tdfpy major.
 - `tests/data/*.d` are real acquisitions (100 MB total). Don't add more; slice by RT.
 - The CI workflow checks out `tdfpy`, `serenipy` and `psims` next to the repo and its
   comment mentions `[tool.uv.sources]`, but `pyproject.toml` has no such table; deps
@@ -185,7 +192,8 @@ Everything in `tdfextractor.__all__`:
 Only the tacular-omics overseer bumps versions or publishes. See `just --list`
 (`build`, `publish`) and `.github/workflows/python-publish.yml` (runs on a published
 GitHub release). The version source is `__version__` in
-`src/tdfextractor/__init__.py` (`[tool.hatch.version]`); also update `CHANGELOG.md`.
+`src/tdfextractor/__init__.py` (`[tool.hatch.version]`); also update `CHANGELOG.md`
+and `CITATION.cff`. Releases are archived on Zenodo (`.zenodo.json`).
 
 ## Workspace note
 
