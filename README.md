@@ -4,6 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/tdfextractor)](https://pypi.org/project/tdfextractor/)
 [![License](https://img.shields.io/github/license/tacular-omics/tdfextractor)](https://github.com/tacular-omics/tdfextractor/blob/main/LICENSE)
 [![Python](https://img.shields.io/pypi/pyversions/tdfextractor)](https://pypi.org/project/tdfextractor/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22927125.svg)](https://doi.org/10.5281/zenodo.22927125)
 
 Converts Bruker timsTOF `.d` folders into MS2, MGF, or mzML files that downstream search engines and de novo sequencing tools already know how to read. It's built on [tdfpy](https://github.com/tacular-omics/tdfpy) for the raw PASEF data access, so you get filtering, precursor handling, and batch processing without writing any Bruker SDK code yourself.
 

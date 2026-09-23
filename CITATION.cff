@@ -11,6 +11,7 @@ abstract: >-
   per-array compression and encoding for mzML output. It requires Python
   3.12 or later.
 version: "0.4.2"
+doi: "10.5281/zenodo.22927125"
 authors:
   - family-names: Garrett
     given-names: Patrick T.
