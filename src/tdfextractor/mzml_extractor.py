@@ -24,7 +24,19 @@ from typing import Any
 
 import numpy as np
 from psims.mzml.writer import MzMLWriter
-from tdfpy import DDA, DIA, PRM, PandasTdf
+from tdfpy import (
+    DDA,
+    DIA,
+    PRM,
+    BaselineThreshold,
+    HistogramThreshold,
+    IterativeMedianThreshold,
+    MadThreshold,
+    MergePeaksCentroider,
+    NoiseSpec,
+    PandasTdf,
+    PercentileThreshold,
+)
 from tqdm import tqdm
 
 from .args import EncodingBitWidth, MzmlArgs
@@ -108,15 +120,42 @@ def _build_encoding_dict(
     }
 
 
+# --centroid-noise-filter name -> tdfpy noise filter class (tdfpy>=2.0's
+# composable noise system; each filter's defaults are used since tdfextractor
+# only exposes the filter choice, not its individual thresholds).
+_NOISE_FILTER_MAP: dict[str, type] = {
+    "mad": MadThreshold,
+    "percentile": PercentileThreshold,
+    "histogram": HistogramThreshold,
+    "baseline": BaselineThreshold,
+    "iterative_median": IterativeMedianThreshold,
+}
+
+
+def _build_noise_filter(name: str | None) -> NoiseSpec:
+    """Translate a --centroid-noise-filter CLI name into a tdfpy noise filter."""
+    if name is None or name == "none":
+        return None
+    try:
+        return _NOISE_FILTER_MAP[name]()
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown centroid noise filter {name!r}; expected one of "
+            f"{sorted(_NOISE_FILTER_MAP)} or 'none'"
+        ) from exc
+
+
 def _build_centroid_kwargs(args: MzmlArgs) -> dict[str, Any]:
     """Build a kwargs dict for tdfpy's centroid() from MzmlArgs centroid fields."""
     return {
-        "mz_tolerance": args.centroid_mz_tolerance,
-        "mz_tolerance_type": args.centroid_mz_tolerance_type,
-        "im_tolerance": args.centroid_im_tolerance,
-        "im_tolerance_type": args.centroid_im_tolerance_type,
-        "min_peaks": args.centroid_min_peaks,
-        "noise_filter": args.centroid_noise_filter,
+        "noise": _build_noise_filter(args.centroid_noise_filter),
+        "centroid": MergePeaksCentroider(
+            mz_tolerance=args.centroid_mz_tolerance,
+            mz_tolerance_type=args.centroid_mz_tolerance_type,
+            im_tolerance=args.centroid_im_tolerance,
+            im_tolerance_type=args.centroid_im_tolerance_type,
+            min_peaks=args.centroid_min_peaks,
+        ),
     }
 
 

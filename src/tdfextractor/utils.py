@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from serenipy import Ms2Spectra
-from tdfpy import PandasTdf, timsdata_connect
+from tdfpy import PandasTdf, get_mobility_collapsed_spectrum, timsdata_connect
 from tdfpy.timsdata import oneOverK0ToCCSforMz
 from tqdm import tqdm
 
@@ -337,10 +337,24 @@ def get_ms2_dda_content(
         for precursor_batch in batch_iterator(
             input_list=list(merged_df.iterrows()), batch_size=batch_size
         ):
-            pasef_ms_ms = None
-            pasef_ms_ms = td.readPasefMsMs(
-                [int(precursor_row["Id_Precursor"]) for _, precursor_row in precursor_batch]
-            )
+            # tdfpy>=3.0 removed the native readPasefMsMs() entry point (Bruker's
+            # libtimsdata is gone). get_mobility_collapsed_spectrum reproduces the
+            # same centroided-per-precursor spectrum from the frame/scan range
+            # already resolved onto each row (see the pasef_frame_msms_info_df
+            # dedup above, which keeps exactly one PASEF window per precursor).
+            pasef_ms_ms = {
+                int(precursor_row["Id_Precursor"]): get_mobility_collapsed_spectrum(
+                    td,
+                    [
+                        (
+                            int(precursor_row["Id_Frame"]),
+                            int(precursor_row["ScanNumBegin"]),
+                            int(precursor_row["ScanNumEnd"]),
+                        )
+                    ],
+                )
+                for _, precursor_row in precursor_batch
+            }
 
             for _, precursor_row in precursor_batch:
                 precursor_id = int(precursor_row["Id_Precursor"])
@@ -393,16 +407,14 @@ def get_ms2_dda_content(
                 ms2_spectra.info["OOK0_Begin"] = str(round(float(ook0_range[0]), 4))
                 ms2_spectra.info["OOK0_End"] = str(round(float(ook0_range[1]), 4))
 
-                ms2_spectra_data = list(
-                    zip(pasef_ms_ms[precursor_id][0], pasef_ms_ms[precursor_id][1])
-                )
+                spectrum = pasef_ms_ms[precursor_id]
 
-                if len(ms2_spectra_data) == 0:
+                if spectrum.size == 0:
                     mz_array = np.array([])
                     intensity_array = np.array([])
                 else:
-                    mz_array = np.array([data[0] for data in ms2_spectra_data])
-                    intensity_array = np.array([data[1] for data in ms2_spectra_data])
+                    mz_array = np.asarray(spectrum[:, 0])
+                    intensity_array = np.asarray(spectrum[:, 1])
 
                 # Apply min_intensity filter
                 if min_spectra_intensity is not None:
@@ -544,15 +556,16 @@ def get_ms2_prm_content(
             if max_precursor_rt is not None and float(row["Time_Frame"]) > max_precursor_rt:
                 continue
 
-            centroid_result = td.extractCentroidedSpectrumForFrame(
-                frame_id=int(row["Frame"]),
-                scan_begin=int(row["ScanNumBegin"]),
-                scan_end=int(row["ScanNumEnd"]),
-                peak_picker_resolution=120000,
+            # tdfpy>=3.0 removed the native extractCentroidedSpectrumForFrame()
+            # entry point (Bruker's libtimsdata is gone); see the equivalent
+            # readPasefMsMs() replacement in get_ms2_dda_content above.
+            centroid_result = get_mobility_collapsed_spectrum(
+                td,
+                [(int(row["Frame"]), int(row["ScanNumBegin"]), int(row["ScanNumEnd"]))],
             )
-            if centroid_result is None:
+            if centroid_result.size == 0:
                 continue
-            mz_list, area_list = centroid_result
+            mz_list, area_list = centroid_result[:, 0], centroid_result[:, 1]
 
             ms2_spectra = Ms2Spectra(
                 low_scan=int(row["Frame"]),
