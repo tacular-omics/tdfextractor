@@ -128,6 +128,9 @@ class MzmlArgs(BaseExtractorArgs):
     centroid_im_tolerance: float = 0.05
     centroid_im_tolerance_type: Literal["relative", "absolute"] = "relative"
     centroid_min_peaks: int = 5
+    # DIA windows / PRM transitions span only a few mobility scans, so the MS1
+    # min_peaks default would empty most of them.
+    centroid_ms2_min_peaks: int = 1
     centroid_noise_filter: str | None = None
 
     def __post_init__(self) -> None:

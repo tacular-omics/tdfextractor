@@ -145,8 +145,12 @@ def _build_noise_filter(name: str | None) -> NoiseSpec:
         ) from exc
 
 
-def _build_centroid_kwargs(args: MzmlArgs) -> dict[str, Any]:
-    """Build a kwargs dict for tdfpy's centroid() from MzmlArgs centroid fields."""
+def _build_centroid_kwargs(args: MzmlArgs, *, ms2: bool = False) -> dict[str, Any]:
+    """Build a kwargs dict for tdfpy's centroid() from MzmlArgs centroid fields.
+
+    ``ms2=True`` uses ``centroid_ms2_min_peaks`` (DIA windows / PRM transitions)
+    instead of ``centroid_min_peaks`` (MS1 frames).
+    """
     return {
         "noise": _build_noise_filter(args.centroid_noise_filter),
         "centroid": MergePeaksCentroider(
@@ -154,7 +158,7 @@ def _build_centroid_kwargs(args: MzmlArgs) -> dict[str, Any]:
             mz_tolerance_type=args.centroid_mz_tolerance_type,
             im_tolerance=args.centroid_im_tolerance,
             im_tolerance_type=args.centroid_im_tolerance_type,
-            min_peaks=args.centroid_min_peaks,
+            min_peaks=args.centroid_ms2_min_peaks if ms2 else args.centroid_min_peaks,
         ),
     }
 
@@ -532,6 +536,13 @@ def _write_dia_or_prm(
         frames_df = frames_df[frames_df["Time"] <= max_precursor_rt]
     frames_df = frames_df.reset_index(drop=True)
 
+    centroid_kwargs = _build_centroid_kwargs(args)
+    ms2_centroid_kwargs = _build_centroid_kwargs(args, ms2=True)
+
+    def ms2_peaks(w: Any) -> tuple[np.ndarray, np.ndarray]:
+        mz2, int2, _ = _split_centroided_peaks(w.centroid(**ms2_centroid_kwargs))
+        return mz2, int2
+
     with reader_factory(analysis_dir) as reader:
         # Materialize the windows/transitions once and group by parent frame.
         if hasattr(reader, "windows"):
@@ -541,37 +552,62 @@ def _write_dia_or_prm(
             window_iter = reader.transitions
             kind = "PRM"
         logger.info(f"Indexing {kind} MS2 windows")
-        grouped, total_ms2 = _collect_windowed_ms2(window_iter)
+        grouped, _ = _collect_windowed_ms2(window_iter)
 
-        frame_ids = frames_df["Id"].to_numpy(dtype=np.int64)
-        msms_types = frames_df["MsMsType"].to_numpy(dtype=np.int64)
-        total_ms1 = int((msms_types == 0).sum()) if include_ms1 else 0
+        # Plan every spectrum before writing: psims writes the spectrumList
+        # count up front, so it must equal what the loop below emits. MS2
+        # windows are centroided here only to drop empty ones, and again when
+        # written, which keeps memory flat on large DIA runs.
+        plan: list[tuple[int, Any]] = []  # (ms level, MS1 frame or MS2 window)
+        for frame_id_np, msms_type_np in zip(
+            frames_df["Id"].to_numpy(dtype=np.int64),
+            frames_df["MsMsType"].to_numpy(dtype=np.int64),
+        ):
+            frame_id = int(frame_id_np)
+            if int(msms_type_np) == 0:
+                if not include_ms1:
+                    plan.append((1, None))  # breaks the MS1 -> MS2 parent link
+                    continue
+                frame = reader.ms1.get(frame_id)
+                if frame is not None:
+                    plan.append((1, frame))
+                continue
+            for w in grouped.get(frame_id, []):
+                iso_mz = float(w.isolation_mz)
+                if min_precursor_mz is not None and iso_mz < min_precursor_mz:
+                    continue
+                if max_precursor_mz is not None and iso_mz > max_precursor_mz:
+                    continue
+                rt_s = float(w.rt)
+                if min_precursor_rt is not None and rt_s < min_precursor_rt:
+                    continue
+                if max_precursor_rt is not None and rt_s > max_precursor_rt:
+                    continue
+                if not keep_empty_spectra and ms2_peaks(w)[0].size == 0:
+                    continue
+                plan.append((2, w))
+
+        total_ms1 = sum(1 for level, item in plan if level == 1 and item is not None)
+        total_ms2 = sum(1 for level, _ in plan if level == 2)
         total_spectra = total_ms1 + total_ms2
 
         logger.info(
             f"Writing mzML ({total_spectra} spectra: {total_ms1} MS1, {total_ms2} {kind} MS2)"
         )
 
-        centroid_kwargs = _build_centroid_kwargs(args)
         scan_counter = 0
         current_ms1_id: str | None = None
         pbar = tqdm(total=total_spectra, desc="Writing mzML", unit="spectra")
 
         with writer.run(id=Path(analysis_dir).stem):
             with writer.spectrum_list(count=total_spectra):
-                for frame_id_np, msms_type_np in zip(frame_ids, msms_types):
-                    frame_id = int(frame_id_np)
-                    msms_type = int(msms_type_np)
-
-                    if msms_type == 0:
-                        if not include_ms1:
+                for level, item in plan:
+                    if level == 1:
+                        if item is None:
                             current_ms1_id = None
                             continue
-                        frame = reader.ms1.get(frame_id)
-                        if frame is None:
-                            continue
                         mz, intensity, mobility = _split_centroided_peaks(
-                            frame.centroid(**centroid_kwargs)
+                            item.centroid(**centroid_kwargs)
                         )
                         scan_counter += 1
                         ms1_id = _scan_id(scan_counter)
@@ -581,7 +617,7 @@ def _write_dia_or_prm(
                             mz=mz,
                             intensity=intensity,
                             mobility=mobility,
-                            rt_seconds=float(frame.time),
+                            rt_seconds=float(item.time),
                             compression=compression,
                             encoding=encoding,
                         )
@@ -589,45 +625,29 @@ def _write_dia_or_prm(
                         pbar.update(1)
                         continue
 
-                    # MS2 frame: write each window/transition for this frame
-                    windows = grouped.get(frame_id, [])
-                    for w in windows:
-                        iso_mz = float(w.isolation_mz)
-                        iso_w = float(w.isolation_width)
-                        if min_precursor_mz is not None and iso_mz < min_precursor_mz:
-                            continue
-                        if max_precursor_mz is not None and iso_mz > max_precursor_mz:
-                            continue
-                        rt_s = float(w.rt)
-                        if min_precursor_rt is not None and rt_s < min_precursor_rt:
-                            continue
-                        if max_precursor_rt is not None and rt_s > max_precursor_rt:
-                            continue
-                        peaks = w.centroid(**centroid_kwargs)
-                        mz2, int2, _ = _split_centroided_peaks(peaks)
-                        if (not keep_empty_spectra) and mz2.size == 0:
-                            continue
-                        ook0 = (float(w.ook0_begin) + float(w.ook0_end)) / 2.0
-                        ce = float(w.collision_energy)
-                        scan_counter += 1
-                        _write_ms2_spectrum(
-                            writer,
-                            scan_id=_scan_id(scan_counter),
-                            parent_scan_id=current_ms1_id,
-                            mz=mz2,
-                            intensity=int2,
-                            rt_seconds=rt_s,
-                            iso_mz=iso_mz,
-                            iso_width=iso_w,
-                            collision_energy=ce,
-                            inverse_reduced_ion_mobility=ook0,
-                            precursor_mz=iso_mz,
-                            precursor_intensity=None,
-                            precursor_charge=None,
-                            compression=compression,
-                            encoding=encoding,
-                        )
-                        pbar.update(1)
+                    w = item
+                    iso_mz = float(w.isolation_mz)
+                    mz2, int2 = ms2_peaks(w)
+                    ook0 = (float(w.ook0_begin) + float(w.ook0_end)) / 2.0
+                    scan_counter += 1
+                    _write_ms2_spectrum(
+                        writer,
+                        scan_id=_scan_id(scan_counter),
+                        parent_scan_id=current_ms1_id,
+                        mz=mz2,
+                        intensity=int2,
+                        rt_seconds=float(w.rt),
+                        iso_mz=iso_mz,
+                        iso_width=float(w.isolation_width),
+                        collision_energy=float(w.collision_energy),
+                        inverse_reduced_ion_mobility=ook0,
+                        precursor_mz=iso_mz,
+                        precursor_intensity=None,
+                        precursor_charge=None,
+                        compression=compression,
+                        encoding=encoding,
+                    )
+                    pbar.update(1)
         pbar.close()
 
 
@@ -758,6 +778,7 @@ def main() -> int | None:
                 return 1
         output_name = None
 
+    failed = 0
     for d_folder in d_folders:
         if not d_folder.is_dir():
             logger.error(f"Path is not a directory: {d_folder}")
@@ -786,11 +807,17 @@ def main() -> int | None:
             write_mzml_file(base_args)
             logger.info("mzML extraction completed successfully!")
         except Exception as e:
+            failed += 1
             logger.error(f"Error during mzML extraction: {e}... skipping {d_folder}")
             logger.error(e, exc_info=True)
         except KeyboardInterrupt:
             logger.info("Extraction interrupted by user.")
             os._exit(0)
+
+    if failed:
+        logger.error(f"{failed} of {len(d_folders)} .d folder(s) failed")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

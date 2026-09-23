@@ -3,7 +3,9 @@ Utility based functions for ms2 extractor
 """
 
 import logging
-from collections.abc import Generator
+import queue
+import threading
+from collections.abc import Callable, Generator, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,55 @@ from tdfpy.timsdata import oneOverK0ToCCSforMz
 from tqdm import tqdm
 
 from .constants import PROTON_MASS
+
+_SENTINEL = object()
+
+
+def consume_in_foreground[T](
+    produce: Callable[[], Iterable[T]],
+    consume: Callable[[Iterator[T]], None],
+    maxsize: int = 100,
+) -> None:
+    """Run ``produce`` on a background thread and ``consume`` on this one.
+
+    Items pass through a bounded queue. An exception raised by either side is
+    re-raised here after the producer thread has stopped, so a failed read can
+    never end in a silently truncated output file.
+    """
+    items: queue.Queue = queue.Queue(maxsize=maxsize)
+    stop = threading.Event()
+    errors: list[BaseException] = []
+
+    def producer() -> None:
+        try:
+            for item in produce():
+                if stop.is_set():
+                    return
+                items.put(item)
+        except BaseException as e:  # re-raised on the calling thread
+            errors.append(e)
+        finally:
+            items.put(_SENTINEL)
+
+    def iter_items() -> Iterator[T]:
+        while (item := items.get()) is not _SENTINEL:
+            yield item
+
+    thread = threading.Thread(target=producer, daemon=True)
+    thread.start()
+    try:
+        consume(iter_items())
+    finally:
+        stop.set()
+        # Drain so a producer blocked on a full queue can reach its sentinel.
+        while thread.is_alive():
+            try:
+                items.get(timeout=0.05)
+            except queue.Empty:
+                pass
+        thread.join()
+    if errors:
+        raise errors[0]
 
 
 def map_frame_id_to_ms1_scan(
@@ -320,6 +371,17 @@ def get_tdf_df(
     return merged_df
 
 
+def _resolve_intensity_threshold(value: float, intensities: np.ndarray) -> float:
+    """Turn a --min/--max-spectra-intensity value into an absolute intensity.
+
+    Values in ``[0, 1]`` (``int`` or ``float``) are a fraction of the spectrum's
+    most intense peak; anything else is an absolute intensity.
+    """
+    if 0.0 <= value <= 1.0:
+        return float(np.max(intensities)) * value if len(intensities) else 0.0
+    return value
+
+
 def get_ms2_dda_content(
     analysis_dir: str,
     merged_df: pd.DataFrame,
@@ -418,36 +480,18 @@ def get_ms2_dda_content(
 
                 # Apply min_intensity filter
                 if min_spectra_intensity is not None:
-                    if (
-                        isinstance(min_spectra_intensity, float)
-                        and 0.0 <= min_spectra_intensity <= 1.0
-                    ):
-                        # Convert percentage to absolute intensity
-                        _min_intensity = max(intensity_array) * min_spectra_intensity
-                    elif (
-                        isinstance(min_spectra_intensity, (float, int))
-                        and min_spectra_intensity > 1.0
-                    ):
-                        _min_intensity = min_spectra_intensity
-
+                    _min_intensity = _resolve_intensity_threshold(
+                        min_spectra_intensity, intensity_array
+                    )
                     intensity_mask = intensity_array >= _min_intensity
                     mz_array = mz_array[intensity_mask]
                     intensity_array = intensity_array[intensity_mask]
 
                 # Apply max_intensity filter
                 if max_spectra_intensity is not None:
-                    if (
-                        isinstance(max_spectra_intensity, float)
-                        and 0.0 <= max_spectra_intensity <= 1.0
-                    ):
-                        # Convert percentage to absolute intensity
-                        _max_intensity = max(intensity_array) * max_spectra_intensity
-                    elif (
-                        isinstance(max_spectra_intensity, (float, int))
-                        and max_spectra_intensity > 1.0
-                    ):
-                        _max_intensity = max_spectra_intensity
-
+                    _max_intensity = _resolve_intensity_threshold(
+                        max_spectra_intensity, intensity_array
+                    )
                     intensity_mask = intensity_array <= _max_intensity
                     mz_array = mz_array[intensity_mask]
                     intensity_array = intensity_array[intensity_mask]
@@ -472,16 +516,16 @@ def get_ms2_dda_content(
                     mz_array = mz_array[precursor_mask]
                     intensity_array = intensity_array[precursor_mask]
 
-                if top_n_peaks is not None and len(intensity_array) > top_n_peaks:
+                if top_n_peaks is not None:
                     if top_n_peaks < 0:
-                        raise ValueError("top_n_peaks must be a positive integer")
-
-                    elif top_n_peaks == 0:
-                        mz_array = np.array([])
-                        intensity_array = np.array([])
-                    elif top_n_peaks > len(intensity_array):
-                        # Get indices of top N intensities
-                        top_indices = np.argpartition(intensity_array, -top_n_peaks)[-top_n_peaks:]
+                        raise ValueError("top_n_peaks must be a non-negative integer")
+                    if len(intensity_array) > top_n_peaks:
+                        # Keep the top N intensities (argpartition needs N >= 1)
+                        top_indices = (
+                            np.argpartition(intensity_array, -top_n_peaks)[-top_n_peaks:]
+                            if top_n_peaks > 0
+                            else np.array([], dtype=np.intp)
+                        )
                         mz_array = mz_array[top_indices]
                         intensity_array = intensity_array[top_indices]
 
@@ -610,14 +654,9 @@ def get_ms2_prm_content(
                 ]
 
             if min_spectra_intensity is not None:
-                if isinstance(min_spectra_intensity, float) and 0.0 <= min_spectra_intensity <= 1.0:
-                    # Convert percentage to absolute intensity
-                    _min_intensity = max(area_list) * min_spectra_intensity if area_list else 0
-                elif (
-                    isinstance(min_spectra_intensity, (float, int)) and min_spectra_intensity > 1.0
-                ):
-                    _min_intensity = min_spectra_intensity
-
+                _min_intensity = _resolve_intensity_threshold(
+                    min_spectra_intensity, np.asarray(area_list)
+                )
                 ms2_spectra_data = [data for data in ms2_spectra_data if data[1] >= _min_intensity]
 
             # Sort by intensity and keep top N if specified

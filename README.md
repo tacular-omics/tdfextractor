@@ -138,7 +138,8 @@ Both MS2 and MGF extractors share the same arguments, with only a few format-spe
 | `--centroid-mz-tolerance-type` | str | `ppm` | Unit for m/z tolerance (`ppm` or `da`) |
 | `--centroid-im-tolerance` | float | `0.05` | Ion mobility tolerance for centroiding |
 | `--centroid-im-tolerance-type` | str | `relative` | Unit for ion mobility tolerance (`relative` or `absolute`) |
-| `--centroid-min-peaks` | int | `5` | Minimum raw peaks required to form a centroided peak |
+| `--centroid-min-peaks` | int | `5` | Minimum raw peaks required to form a centroided MS1 peak |
+| `--centroid-ms2-min-peaks` | int | `1` | Minimum raw peaks required to form a centroided peak in DIA windows / PRM transitions |
 
 ### Performance Options
 

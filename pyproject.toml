@@ -80,7 +80,9 @@ dev = [
     "ty>=0.0.9",
     "ruff>=0.14.3",
     "pyupgrade>=3.21.0",
-    "pynumpress>=0.0.9",
+    # pynumpress ships only an sdist whose build crashes on Windows CPython
+    # 3.13+; no test needs it, so skip it there.
+    "pynumpress>=0.0.9; sys_platform != 'win32'",
     "pyzstd>=0.16",
 ]
 

@@ -171,3 +171,43 @@ def test_compression_param_plumbed_to_mz_array(
         saw_mz = True
         break
     assert saw_mz, "no spectrum with an m/z array was found"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "mzml_dda_output",
+        "mzml_dia_output",
+        "mzml_prm_output",
+        "mzml_prm_default_output",
+        "mzml_dia_no_ms1_output",
+    ],
+)
+def test_spectrum_list_count_matches_written_spectra(request, fixture_name: str) -> None:
+    """The declared spectrumList count must equal the spectra actually written.
+
+    Regression: the DIA/PRM writer declared the unfiltered window count, so an
+    RT-bounded or sparse extraction declared more spectra than it wrote.
+    """
+    out = request.getfixturevalue(fixture_name)
+    root = _parse_mzml(out)
+    spectrum_list = next(root.iter("{http://psi.hupo.org/ms/mzml}spectrumList"))
+    n_written = sum(1 for _ in _iter_spectra(root))
+    assert int(spectrum_list.attrib["count"]) == n_written
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    ("fixture_name", "min_ms2"),
+    [("mzml_dia_output", 30), ("mzml_prm_default_output", 50)],
+)
+def test_default_centroiding_keeps_windowed_ms2(request, fixture_name: str, min_ms2: int) -> None:
+    """Regression: default centroiding (min_peaks=5) emptied most DIA windows and
+    every PRM transition, so the PRM file wrote 0 MS2 spectra.
+
+    The RT slices hold ~45 DIA windows and ~85 PRM transitions.
+    """
+    root = _parse_mzml(request.getfixturevalue(fixture_name))
+    n_ms2 = sum(1 for s in _iter_spectra(root) if _ms_level(s) == 2)
+    assert n_ms2 >= min_ms2
