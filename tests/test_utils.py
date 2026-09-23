@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from conftest import DDA_MAX_RT
 
 from tdfextractor.utils import _resolve_intensity_threshold, get_ms2_dda_content, get_tdf_df

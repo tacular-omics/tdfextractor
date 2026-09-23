@@ -5,6 +5,7 @@ ms2_extractor defines functions for generating ms2 files from DDA and PRM based 
 import argparse
 import logging
 import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -57,38 +58,40 @@ def write_mgf_file(args: MgfArgs) -> None:
 
     def consumer(spectra):
         logger.info("Writing Contents To File")
-        with open(output_file, "w", encoding="UTF-8") as file:
-            with tqdm(desc="Writing MGF File", unit="spectra", total=len(merged_df)) as pbar:
-                # https://www.matrixscience.com/help/data_file_help.html
-                header_lines = []
-                header_lines.append("INSTRUMENT=TimsTOF")
-                header_lines.append("MASS=Mono")
+        with (
+            open(output_file, "w", encoding="UTF-8") as file,
+            tqdm(desc="Writing MGF File", unit="spectra", total=len(merged_df)) as pbar,
+        ):
+            # https://www.matrixscience.com/help/data_file_help.html
+            header_lines = []
+            header_lines.append("INSTRUMENT=TimsTOF")
+            header_lines.append("MASS=Mono")
 
-                for spectrum in spectra:
-                    pbar.update(1)
+            for spectrum in spectra:
+                pbar.update(1)
 
-                    if len(spectrum.mz_spectra) == 0 and args.keep_empty_spectra is False:
-                        continue
+                if len(spectrum.mz_spectra) == 0 and args.keep_empty_spectra is False:
+                    continue
 
-                    mgf_lines = []
-                    mgf_lines.append("BEGIN IONS")
+                mgf_lines = []
+                mgf_lines.append("BEGIN IONS")
+                mgf_lines.append(
+                    f"TITLE={Path(analysis_dir).stem}.{spectrum.low_scan}.{spectrum.high_scan}.{spectrum.charge} "
+                    f'File="{Path(analysis_dir).stem}", NativeID="merged={spectrum.precursor_id} frame={spectrum.parent_id} '
+                    f'scanStart={spectrum.scan_begin} scanEnd={spectrum.scan_end} scan={spectrum.low_scan}"'
+                )
+                mgf_lines.append(f"RTINSECONDS={spectrum.rt:.2f}")
+                # Pepmass is actually mz? huh?
+                mgf_lines.append(
+                    f"PEPMASS={spectrum.mz:.6f} {spectrum.prec_intensity:.{args.intensity_precision}f}"
+                )
+                mgf_lines.append(f"CHARGE={spectrum.charge}+")
+                for mz, intensity in zip(spectrum.mz_spectra, spectrum.intensity_spectra):
                     mgf_lines.append(
-                        f"TITLE={Path(analysis_dir).stem}.{spectrum.low_scan}.{spectrum.high_scan}.{spectrum.charge} "
-                        f'File="{Path(analysis_dir).stem}", NativeID="merged={spectrum.precursor_id} frame={spectrum.parent_id} '
-                        f'scanStart={spectrum.scan_begin} scanEnd={spectrum.scan_end} scan={spectrum.low_scan}"'
+                        f"{mz:.{args.mz_precision}f} {intensity:.{args.intensity_precision}f}"
                     )
-                    mgf_lines.append(f"RTINSECONDS={spectrum.rt:.2f}")
-                    # Pepmass is actually mz? huh?
-                    mgf_lines.append(
-                        f"PEPMASS={spectrum.mz:.6f} {spectrum.prec_intensity:.{args.intensity_precision}f}"
-                    )
-                    mgf_lines.append(f"CHARGE={spectrum.charge}+")
-                    for mz, intensity in zip(spectrum.mz_spectra, spectrum.intensity_spectra):
-                        mgf_lines.append(
-                            f"{mz:.{args.mz_precision}f} {intensity:.{args.intensity_precision}f}"
-                        )
-                    mgf_lines.append("END IONS")
-                    file.write("\n".join(mgf_lines) + "\n\n")
+                mgf_lines.append("END IONS")
+                file.write("\n".join(mgf_lines) + "\n\n")
 
     consume_in_foreground(producer, consumer)
 
@@ -137,8 +140,8 @@ def process_single_d_folder(
         write_mgf_file(mgf_args)
         logger.info(f"MGF extraction completed successfully for {d_folder}!")
         return True
-    except Exception as e:
-        logger.error(f"Error during MGF extraction for {d_folder}: {e}")
+    except Exception:
+        logger.exception(f"Error during MGF extraction for {d_folder}")
         return False
 
 
@@ -209,7 +212,7 @@ def main() -> int | None:
             try:
                 output_dir.mkdir(parents=True, exist_ok=True)
                 logger.info(f"Created output directory: {output_dir}")
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Failed to create output directory: {e}")
                 return 1
 
@@ -241,8 +244,8 @@ def main() -> int | None:
                             successful_count += 1
                         else:
                             failed_count += 1
-                    except Exception as e:
-                        logger.error(f"Unexpected error processing {d_folder}: {e}")
+                    except Exception:
+                        logger.exception(f"Unexpected error processing {d_folder}")
                         failed_count += 1
         except KeyboardInterrupt:
             logger.info("\nExtraction interrupted by user.")
@@ -267,4 +270,4 @@ def main() -> int | None:
 
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())

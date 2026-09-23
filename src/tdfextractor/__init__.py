@@ -18,13 +18,13 @@ from .mzml_extractor import write_mzml_file
 from .utils import get_ms2_dda_content, get_ms2_dda_spectra, get_tdf_df
 
 __all__ = [
-    "__version__",
     "BaseExtractorArgs",
     "CompressionName",
     "EncodingBitWidth",
     "MgfArgs",
     "Ms2Args",
     "MzmlArgs",
+    "__version__",
     "get_ms2_dda_content",
     "get_ms2_dda_spectra",
     "get_tdf_df",

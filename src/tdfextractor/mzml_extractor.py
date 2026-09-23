@@ -16,6 +16,7 @@ keyword arguments to :func:`write_mzml_file`.
 
 import logging
 import os
+import sys
 import time
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
@@ -434,61 +435,60 @@ def _write_dda(
 
     centroid_kwargs = _build_centroid_kwargs(args)
 
-    with writer.run(id=Path(analysis_dir).stem):
-        with writer.spectrum_list(count=total_spectra):
-            ms1_iter = (
-                _iter_dda_ms1(analysis_dir, ms1_frame_ids, centroid_kwargs)
-                if args.include_ms1
-                else iter(())
-            )
+    with writer.run(id=Path(analysis_dir).stem), writer.spectrum_list(count=total_spectra):
+        ms1_iter = (
+            _iter_dda_ms1(analysis_dir, ms1_frame_ids, centroid_kwargs)
+            if args.include_ms1
+            else iter(())
+        )
 
-            pbar = tqdm(total=total_spectra, desc="Writing mzML", unit="spectra")
-            for frame_id, mz_arr, int_arr, mob_arr, rt_s in ms1_iter:
-                ms1_scan_index = frame_id_to_ms1_scan.get(frame_id)
-                if ms1_scan_index is None:
+        pbar = tqdm(total=total_spectra, desc="Writing mzML", unit="spectra")
+        for frame_id, mz_arr, int_arr, mob_arr, rt_s in ms1_iter:
+            ms1_scan_index = frame_id_to_ms1_scan.get(frame_id)
+            if ms1_scan_index is None:
+                continue
+            ms1_id = _scan_id(ms1_scan_index)
+            _write_ms1_spectrum(
+                writer,
+                scan_id=ms1_id,
+                mz=mz_arr,
+                intensity=int_arr,
+                mobility=mob_arr,
+                rt_seconds=rt_s,
+                compression=compression,
+                encoding=encoding,
+            )
+            pbar.update(1)
+
+            for ms2 in ms2_by_parent.get(frame_id, []):
+                ms2_scan_index = ms2_scan_map.get(frame_id, {}).get(int(ms2.precursor_id))
+                if ms2_scan_index is None:
                     continue
-                ms1_id = _scan_id(ms1_scan_index)
-                _write_ms1_spectrum(
+                iso_mz = float(getattr(ms2, "iso_mz", ms2.mz))
+                iso_w = float(getattr(ms2, "iso_width", 2.0))
+                ce = float(getattr(ms2, "ce", 0.0))
+                ook0 = float(getattr(ms2, "ook0", 0.0))
+                mz2 = np.asarray(ms2.mz_spectra, dtype=np.float64)
+                int2 = np.asarray(ms2.intensity_spectra, dtype=np.float32)
+                _write_ms2_spectrum(
                     writer,
-                    scan_id=ms1_id,
-                    mz=mz_arr,
-                    intensity=int_arr,
-                    mobility=mob_arr,
-                    rt_seconds=rt_s,
+                    scan_id=_scan_id(ms2_scan_index),
+                    parent_scan_id=ms1_id,
+                    mz=mz2,
+                    intensity=int2,
+                    rt_seconds=float(ms2.rt),
+                    iso_mz=iso_mz,
+                    iso_width=iso_w,
+                    collision_energy=ce,
+                    inverse_reduced_ion_mobility=ook0,
+                    precursor_mz=float(ms2.mz),
+                    precursor_intensity=float(ms2.prec_intensity),
+                    precursor_charge=int(ms2.charge),
                     compression=compression,
                     encoding=encoding,
                 )
                 pbar.update(1)
-
-                for ms2 in ms2_by_parent.get(frame_id, []):
-                    ms2_scan_index = ms2_scan_map.get(frame_id, {}).get(int(ms2.precursor_id))
-                    if ms2_scan_index is None:
-                        continue
-                    iso_mz = float(getattr(ms2, "iso_mz", ms2.mz))
-                    iso_w = float(getattr(ms2, "iso_width", 2.0))
-                    ce = float(getattr(ms2, "ce", 0.0))
-                    ook0 = float(getattr(ms2, "ook0", 0.0))
-                    mz2 = np.asarray(ms2.mz_spectra, dtype=np.float64)
-                    int2 = np.asarray(ms2.intensity_spectra, dtype=np.float32)
-                    _write_ms2_spectrum(
-                        writer,
-                        scan_id=_scan_id(ms2_scan_index),
-                        parent_scan_id=ms1_id,
-                        mz=mz2,
-                        intensity=int2,
-                        rt_seconds=float(ms2.rt),
-                        iso_mz=iso_mz,
-                        iso_width=iso_w,
-                        collision_energy=ce,
-                        inverse_reduced_ion_mobility=ook0,
-                        precursor_mz=float(ms2.mz),
-                        precursor_intensity=float(ms2.prec_intensity),
-                        precursor_charge=int(ms2.charge),
-                        compression=compression,
-                        encoding=encoding,
-                    )
-                    pbar.update(1)
-            pbar.close()
+        pbar.close()
 
 
 # ---------------------------------------------------------------------------
@@ -599,55 +599,54 @@ def _write_dia_or_prm(
         current_ms1_id: str | None = None
         pbar = tqdm(total=total_spectra, desc="Writing mzML", unit="spectra")
 
-        with writer.run(id=Path(analysis_dir).stem):
-            with writer.spectrum_list(count=total_spectra):
-                for level, item in plan:
-                    if level == 1:
-                        if item is None:
-                            current_ms1_id = None
-                            continue
-                        mz, intensity, mobility = _split_centroided_peaks(
-                            item.centroid(**centroid_kwargs)
-                        )
-                        scan_counter += 1
-                        ms1_id = _scan_id(scan_counter)
-                        _write_ms1_spectrum(
-                            writer,
-                            scan_id=ms1_id,
-                            mz=mz,
-                            intensity=intensity,
-                            mobility=mobility,
-                            rt_seconds=float(item.time),
-                            compression=compression,
-                            encoding=encoding,
-                        )
-                        current_ms1_id = ms1_id
-                        pbar.update(1)
+        with writer.run(id=Path(analysis_dir).stem), writer.spectrum_list(count=total_spectra):
+            for level, item in plan:
+                if level == 1:
+                    if item is None:
+                        current_ms1_id = None
                         continue
-
-                    w = item
-                    iso_mz = float(w.isolation_mz)
-                    mz2, int2 = ms2_peaks(w)
-                    ook0 = (float(w.ook0_begin) + float(w.ook0_end)) / 2.0
+                    mz, intensity, mobility = _split_centroided_peaks(
+                        item.centroid(**centroid_kwargs)
+                    )
                     scan_counter += 1
-                    _write_ms2_spectrum(
+                    ms1_id = _scan_id(scan_counter)
+                    _write_ms1_spectrum(
                         writer,
-                        scan_id=_scan_id(scan_counter),
-                        parent_scan_id=current_ms1_id,
-                        mz=mz2,
-                        intensity=int2,
-                        rt_seconds=float(w.rt),
-                        iso_mz=iso_mz,
-                        iso_width=float(w.isolation_width),
-                        collision_energy=float(w.collision_energy),
-                        inverse_reduced_ion_mobility=ook0,
-                        precursor_mz=iso_mz,
-                        precursor_intensity=None,
-                        precursor_charge=None,
+                        scan_id=ms1_id,
+                        mz=mz,
+                        intensity=intensity,
+                        mobility=mobility,
+                        rt_seconds=float(item.time),
                         compression=compression,
                         encoding=encoding,
                     )
+                    current_ms1_id = ms1_id
                     pbar.update(1)
+                    continue
+
+                w = item
+                iso_mz = float(w.isolation_mz)
+                mz2, int2 = ms2_peaks(w)
+                ook0 = (float(w.ook0_begin) + float(w.ook0_end)) / 2.0
+                scan_counter += 1
+                _write_ms2_spectrum(
+                    writer,
+                    scan_id=_scan_id(scan_counter),
+                    parent_scan_id=current_ms1_id,
+                    mz=mz2,
+                    intensity=int2,
+                    rt_seconds=float(w.rt),
+                    iso_mz=iso_mz,
+                    iso_width=float(w.isolation_width),
+                    collision_energy=float(w.collision_energy),
+                    inverse_reduced_ion_mobility=ook0,
+                    precursor_mz=iso_mz,
+                    precursor_intensity=None,
+                    precursor_charge=None,
+                    compression=compression,
+                    encoding=encoding,
+                )
+                pbar.update(1)
         pbar.close()
 
 
@@ -773,7 +772,7 @@ def main() -> int | None:
             try:
                 output_dir.mkdir(parents=True, exist_ok=True)
                 logger.info(f"Created output directory: {output_dir}")
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Failed to create output directory: {e}")
                 return 1
         output_name = None
@@ -806,10 +805,9 @@ def main() -> int | None:
             base_args.output_file = output
             write_mzml_file(base_args)
             logger.info("mzML extraction completed successfully!")
-        except Exception as e:
+        except Exception:
             failed += 1
-            logger.error(f"Error during mzML extraction: {e}... skipping {d_folder}")
-            logger.error(e, exc_info=True)
+            logger.exception(f"Error during mzML extraction... skipping {d_folder}")
         except KeyboardInterrupt:
             logger.info("Extraction interrupted by user.")
             os._exit(0)
@@ -821,4 +819,4 @@ def main() -> int | None:
 
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())

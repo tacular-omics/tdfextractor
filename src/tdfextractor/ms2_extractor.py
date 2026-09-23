@@ -4,6 +4,7 @@ ms2_extractor defines functions for generating ms2 files from DDA and PRM based 
 
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -46,7 +47,7 @@ def generate_header(args: Ms2Args) -> str:
         precursors_df = pd_tdf.precursors
         frames_df = pd_tdf.frames
         precursor_to_scan_number = map_precursor_to_ip2_scan_number(precursors_df, frames_df)
-        first_scan = list(precursor_to_scan_number.values())[0]
+        first_scan = next(iter(precursor_to_scan_number.values()))
         last_scan = list(precursor_to_scan_number.values())[-1]
     elif pd_tdf.is_prm:
         method = "Parallel-Reaction-Monitoring"
@@ -104,7 +105,7 @@ def generate_header(args: Ms2Args) -> str:
 
     ms2_header = MS2_HEADER.format(
         version="TDF-Extractor",
-        date_of_creation=str(datetime.now().strftime("%B %d, %Y %H:%M")),
+        date_of_creation=str(datetime.now().astimezone().strftime("%B %d, %Y %H:%M")),
         min_spectra_intensity=_or_none(args.min_spectra_intensity),
         max_spectra_intensity=_or_none(args.max_spectra_intensity),
         min_spectra_mz=_or_none(args.min_spectra_mz),
@@ -272,7 +273,7 @@ def main() -> int | None:
             try:
                 output_dir.mkdir(parents=True, exist_ok=True)
                 logger.info(f"Created output directory: {output_dir}")
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Failed to create output directory: {e}")
                 return 1
 
@@ -308,10 +309,9 @@ def main() -> int | None:
             base_args.output_file = output
             write_ms2_file(base_args)
             logger.info("MS2 extraction completed successfully!")
-        except Exception as e:
+        except Exception:
             failed += 1
-            logger.error(f"Error during Ms2 extraction: {e}... skipping {d_folder}")
-            logger.error(e, exc_info=True)
+            logger.exception(f"Error during Ms2 extraction... skipping {d_folder}")
         except KeyboardInterrupt:
             logger.info("Extraction interrupted by user.")
             os._exit(0)
@@ -323,4 +323,4 @@ def main() -> int | None:
 
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())

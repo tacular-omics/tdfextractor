@@ -18,6 +18,8 @@ from tqdm import tqdm
 
 from .constants import PROTON_MASS
 
+logger = logging.getLogger(__name__)
+
 _SENTINEL = object()
 
 
@@ -42,7 +44,7 @@ def consume_in_foreground[T](
                 if stop.is_set():
                     return
                 items.put(item)
-        except BaseException as e:  # re-raised on the calling thread
+        except BaseException as e:  # noqa: BLE001 - re-raised on the calling thread
             errors.append(e)
         finally:
             items.put(_SENTINEL)
@@ -242,14 +244,14 @@ def get_tdf_df(
     )
 
     initial_rows = len(merged_df)
-    logging.info(f"Initial number of precursors: {initial_rows}")
+    logger.info(f"Initial number of precursors: {initial_rows}")
 
     if min_precursor_neutral_mass is not None:
         before_filter = len(merged_df)
         merged_df = merged_df[merged_df["NeutralMass"] >= min_precursor_neutral_mass]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by min_precursor_neutral_mass >= {min_precursor_neutral_mass} (remaining: {after_filter})"
         )
 
@@ -258,7 +260,7 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["NeutralMass"] <= max_precursor_neutral_mass]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by max_precursor_neutral_mass <= {max_precursor_neutral_mass} (remaining: {after_filter})"
         )
 
@@ -267,7 +269,7 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["Charge"] >= min_precursor_charge]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by min_precursor_charge >= {min_precursor_charge} (remaining: {after_filter})"
         )
 
@@ -276,7 +278,7 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["Charge"] <= max_precursor_charge]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by max_precursor_charge <= {max_precursor_charge} (remaining: {after_filter})"
         )
 
@@ -285,7 +287,7 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["MonoisotopicMz"] >= min_precursor_mz]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by min_precursor_mz >= {min_precursor_mz} (remaining: {after_filter})"
         )
 
@@ -294,7 +296,7 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["MonoisotopicMz"] <= max_precursor_mz]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by max_precursor_mz <= {max_precursor_mz} (remaining: {after_filter})"
         )
 
@@ -303,7 +305,7 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["Time"] >= min_precursor_rt]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by min_precursor_rt >= {min_precursor_rt} (remaining: {after_filter})"
         )
 
@@ -312,7 +314,7 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["Time"] <= max_precursor_rt]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by max_precursor_rt <= {max_precursor_rt} (remaining: {after_filter})"
         )
 
@@ -321,7 +323,7 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["Intensity"] >= min_precursor_intensity]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by min_precursor_intensity >= {min_precursor_intensity} (remaining: {after_filter})"
         )
 
@@ -330,7 +332,7 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["Intensity"] <= max_precursor_intensity]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by max_precursor_intensity <= {max_precursor_intensity} (remaining: {after_filter})"
         )
 
@@ -350,7 +352,7 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["CCS"] >= min_precursor_ccs]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by min_precursor_ccs >= {min_precursor_ccs} (remaining: {after_filter})"
         )
 
@@ -359,13 +361,13 @@ def get_tdf_df(
         merged_df = merged_df[merged_df["CCS"] <= max_precursor_ccs]
         after_filter = len(merged_df)
         filtered_count = before_filter - after_filter
-        logging.info(
+        logger.info(
             f"Filtered {filtered_count} precursors by max_precursor_ccs <= {max_precursor_ccs} (remaining: {after_filter})"
         )
 
     final_rows = len(merged_df)
     total_filtered = initial_rows - final_rows
-    logging.info(
+    logger.info(
         f"Total precursors filtered: {total_filtered} ({(total_filtered / initial_rows) * 100:.1f}%), Final count: {final_rows}"
     )
     return merged_df
