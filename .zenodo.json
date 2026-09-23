@@ -1,0 +1,45 @@
+{
+  "title": "tdfextractor: Extract MS2, MGF, and mzML files from Bruker timsTOF .d folders",
+  "description": "tdfextractor reads Bruker timsTOF .d folders (DDA, DIA, and PRM acquisitions) via tdfpy and writes MS2, MGF, and mzML spectrum files for downstream search engines and processing pipelines. It supports precursor filtering by intensity, charge, m/z, retention time, CCS, and neutral mass, configurable peak centroiding and noise filtering, and per-array compression and encoding for mzML output. It requires Python 3.12 or later.",
+  "creators": [
+    {
+      "name": "Garrett, Patrick T.",
+      "orcid": "0000-0002-8434-9693",
+      "affiliation": "Scripps Research Institute"
+    },
+    {
+      "name": "Yates, John R. III",
+      "orcid": "0000-0001-5267-1672",
+      "affiliation": "Scripps Research Institute"
+    }
+  ],
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "mit",
+  "language": "eng",
+  "keywords": [
+    "Python",
+    "Bruker",
+    "timsTOF",
+    "Mass Spectrometry",
+    "Proteomics",
+    "PASEF"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/tacular-omics/tdfextractor",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://pypi.org/project/tdfextractor/",
+      "relation": "isAlternateIdentifier",
+      "scheme": "url"
+    }
+  ],
+  "communities": [
+    {
+      "identifier": "proteomics"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "tdfextractor: Extract MS2, MGF, and mzML files from Bruker timsTOF .d folders"
+abstract: >-
+  tdfextractor reads Bruker timsTOF .d folders (DDA, DIA, and PRM
+  acquisitions) via tdfpy and writes MS2, MGF, and mzML spectrum files for
+  downstream search engines and processing pipelines. It supports
+  precursor filtering by intensity, charge, m/z, retention time, CCS, and
+  neutral mass, configurable peak centroiding and noise filtering, and
+  per-array compression and encoding for mzML output. It requires Python
+  3.12 or later.
+version: "0.4.1"
+authors:
+  - family-names: Garrett
+    given-names: Patrick T.
+    orcid: https://orcid.org/0000-0002-8434-9693
+    affiliation: Scripps Research Institute
+  - family-names: Yates
+    given-names: John R.
+    name-suffix: III
+    orcid: https://orcid.org/0000-0001-5267-1672
+    affiliation: Scripps Research Institute
+repository-code: https://github.com/tacular-omics/tdfextractor
+license: MIT
+keywords:
+  - Python
+  - Bruker
+  - timsTOF
+  - Mass Spectrometry
+  - Proteomics
+  - PASEF

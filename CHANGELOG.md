@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1]
+### Added
+- Archived on Zenodo (`CITATION.cff`, `.zenodo.json`).
+
+### Changed
+- `tdfpy` dependency raised from `>=1.2.0` (uncapped) to `>=4.0,<5` per the
+  org's sibling pin policy. This is a major-version jump; adapted the
+  affected code (see Fixed).
+
+### Fixed
+- `get_ms2_dda_content` and `get_ms2_prm_content` (the latter not yet wired
+  into a CLI) used `TimsData.readPasefMsMs` and
+  `TimsData.extractCentroidedSpectrumForFrame`, both removed in tdfpy 3.0.0
+  along with Bruker's `libtimsdata`. Replaced with
+  `tdfpy.get_mobility_collapsed_spectrum` over the same per-precursor
+  frame/scan range, which reproduces the same centroided-per-precursor
+  spectrum shape.
+- mzML centroiding (`_build_centroid_kwargs` in `mzml_extractor`) passed
+  flat `mz_tolerance`/`im_tolerance`/`noise_filter` kwargs to
+  `Frame.centroid()` / `DiaWindow.centroid()`, which tdfpy 2.0.0's
+  composable centroiding API replaced with `centroid: Centroider` and
+  `noise: NoiseSpec` parameters. Now builds a `tdfpy.MergePeaksCentroider`
+  from the existing `MzmlArgs` fields and maps `--centroid-noise-filter`
+  onto the matching `tdfpy.noise` filter class.
+- `MzmlArgs.centroid_mz_tolerance_type` / `centroid_im_tolerance_type` are
+  now typed `Literal["ppm", "da"]` / `Literal["relative", "absolute"]`
+  (matching their CLI `choices`) instead of plain `str`, which `ty` flagged
+  once they were passed to `MergePeaksCentroider`.
+
 ## [0.4.0]
 ### Changed (BREAKING)
 - `write_ms2_file`, `write_mgf_file`, and `write_mzml_file` now take a single

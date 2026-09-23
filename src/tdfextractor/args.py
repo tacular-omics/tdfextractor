@@ -122,11 +122,11 @@ class MzmlArgs(BaseExtractorArgs):
     mz_encoding: EncodingBitWidth = 64
     intensity_encoding: EncodingBitWidth = 32
 
-    # Centroiding parameters forwarded to tdfpy's centroid()
+    # Centroiding parameters forwarded to tdfpy's MergePeaksCentroider
     centroid_mz_tolerance: float = 8.0
-    centroid_mz_tolerance_type: str = "ppm"
+    centroid_mz_tolerance_type: Literal["ppm", "da"] = "ppm"
     centroid_im_tolerance: float = 0.05
-    centroid_im_tolerance_type: str = "relative"
+    centroid_im_tolerance_type: Literal["relative", "absolute"] = "relative"
     centroid_min_peaks: int = 5
     centroid_noise_filter: str | None = None
 
