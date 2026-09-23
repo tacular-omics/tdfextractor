@@ -10,7 +10,7 @@ abstract: >-
   neutral mass, configurable peak centroiding and noise filtering, and
   per-array compression and encoding for mzML output. It requires Python
   3.12 or later.
-version: "0.4.1"
+version: "0.4.2"
 authors:
   - family-names: Garrett
     given-names: Patrick T.
