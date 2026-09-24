@@ -1,0 +1,62 @@
+# tacular-omics CI, adapted from the workspace templates/ for a downstream repo.
+# Differences from the template:
+# - no scripts/release_version.py, so no version-metadata check;
+# - syncs --all-groups without --all-extras: the `compression` extra pulls
+#   pynumpress, whose sdist does not build on Windows CPython 3.13+ (the dev
+#   group already installs it everywhere else);
+# - Windows runs every Python version, as the previous CI did;
+# - no lowest-direct job yet: numpy, pandas and tqdm have no lower bound, so
+#   the lowest resolution picks unbuildable releases. Add floors, then the job.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - run: uv sync --locked --all-groups
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run ty check src
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12", "3.13", "3.14"]
+        include:
+          - { os: macos-latest, python: "3.13" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked --all-groups
+      - run: uv run pytest tests
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - run: uv build
+      - name: Import the built wheel outside the checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          uv run --isolated --no-project --with "$(ls ${{ github.workspace }}/dist/*.whl)" python -c "import tdfextractor; print(tdfextractor.__version__)"
