@@ -24,7 +24,6 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Development Status :: 4 - Beta",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Chemistry",
@@ -33,13 +32,15 @@ classifiers = [
 ]
 readme = "README.md"
 requires-python = ">=3.12"
-license = {file = "LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["bruker", "timstof", "mass-spectrometry", "proteomics", "tdf", "ms2", "mgf", "mzml", "pasef"]
 
 [project.urls]
 Homepage = "https://github.com/tacular-omics/tdfextractor"
+Documentation = "https://github.com/tacular-omics/tdfextractor#readme"
 Repository = "https://github.com/tacular-omics/tdfextractor"
-"Bug Tracker" = "https://github.com/tacular-omics/tdfextractor/issues"
+Issues = "https://github.com/tacular-omics/tdfextractor/issues"
 Changelog = "https://github.com/tacular-omics/tdfextractor/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
