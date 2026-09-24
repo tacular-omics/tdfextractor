@@ -156,9 +156,9 @@ def _build_centroid_kwargs(args: MzmlArgs, *, ms2: bool = False) -> dict[str, An
         "noise": _build_noise_filter(args.centroid_noise_filter),
         "centroid": MergePeaksCentroider(
             mz_tolerance=args.centroid_mz_tolerance,
-            mz_tolerance_type=args.centroid_mz_tolerance_type,
+            mz_tolerance_unit=args.centroid_mz_tolerance_type,
             im_tolerance=args.centroid_im_tolerance,
-            im_tolerance_type=args.centroid_im_tolerance_type,
+            im_tolerance_unit=args.centroid_im_tolerance_type,
             min_peaks=args.centroid_ms2_min_peaks if ms2 else args.centroid_min_peaks,
         ),
     }
@@ -357,7 +357,7 @@ def _iter_dda_ms1(
             if frame is None:
                 continue
             mz, intensity, mobility = _split_centroided_peaks(frame.centroid(**centroid_kwargs))
-            yield int(fid), mz, intensity, mobility, float(frame.time)
+            yield int(fid), mz, intensity, mobility, float(frame.rt)
 
 
 def _write_dda(
@@ -616,7 +616,7 @@ def _write_dia_or_prm(
                         mz=mz,
                         intensity=intensity,
                         mobility=mobility,
-                        rt_seconds=float(item.time),
+                        rt_seconds=float(item.rt),
                         compression=compression,
                         encoding=encoding,
                     )

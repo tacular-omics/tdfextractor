@@ -9,7 +9,7 @@ dataclasses.
 
 Place in the tacular-omics graph:
 
-- **Upstream:** `tdfpy>=4.0,<5` (raw TDF/PASEF access, `PandasTdf`, `timsdata_connect`,
+- **Upstream:** `tdfpy>=5.0,<6` (raw TDF/PASEF access, `PandasTdf`, `timsdata_connect`,
   `get_mobility_collapsed_spectrum`, `DDA`/`DIA`/`PRM` readers, `MergePeaksCentroider`
   and the `NoiseSpec` threshold classes). Also `serenipy` (the `Ms2Spectra`
   record and MS2 serialization) and `psims` (mzML writer). None of these is
@@ -173,9 +173,11 @@ Everything in `tdfextractor.__all__`:
   `PEPMASS` is the precursor m/z.
 - **tdfpy API breaks across majors.** tdfpy 2.0 replaced the flat `centroid()` kwargs
   with centroider/`NoiseSpec` objects and 3.0 removed Bruker's libtimsdata
-  (`TimsData.readPasefMsMs`, `extractCentroidedSpectrumForFrame`). Since 0.4.1 the
-  code targets tdfpy 4 (`pyproject.toml`: `tdfpy>=4.0,<5`; `uv.lock`: 4.0.2) and
-  uses `get_mobility_collapsed_spectrum` for DDA/PRM MS2 peaks. Peak lists differ from
+  (`TimsData.readPasefMsMs`, `extractCentroidedSpectrumForFrame`). 5.0 renamed with no
+  alias (`scan_num_to_ook0`, `ook0_to_ccs`, `Frame.rt`, `mz_tolerance_unit` /
+  `im_tolerance_unit`; see tdfpy's `docs/migration.md`). The code targets tdfpy 5
+  (`pyproject.toml`: `tdfpy>=5.0,<6`; `uv.lock` still pins 4.x until tdfpy 5 is on
+  PyPI) and uses `get_mobility_collapsed_spectrum` for DDA/PRM MS2 peaks. Peak lists differ from
   0.4.0 output (e.g. the first bundled DDA spectrum went from 1782 to 4292 peaks), so
   don't compare against files written by older versions. Do not raise the cap without
   running the full test suite on the new tdfpy major.

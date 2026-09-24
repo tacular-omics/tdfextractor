@@ -39,7 +39,8 @@ pip install "tdfextractor[compression]"   # adds pynumpress + pyzstd for mzML
 Requires Python >= 3.12. Runtime dependencies: tdfpy, serenipy, psims, numpy, pandas,
 tqdm, numba.
 
-Note on tdfpy: tdfextractor 0.4.1 requires `tdfpy>=4.0,<5` and uses the tdfpy 4 API.
+Note on tdfpy: the next tdfextractor release requires `tdfpy>=5.0,<6` and uses the tdfpy 5 API;
+0.4.1 and 0.4.2 require `tdfpy>=4.0,<5`.
 tdfextractor 0.4.0 declared an uncapped `tdfpy>=1.2.0` but only works with tdfpy 1.x;
 if you are stuck on 0.4.0, install `tdfpy<2` next to it. Peak lists from 0.4.1 differ
 from 0.4.0 output for the same file (tdfpy 4 reads MS2 peaks differently).

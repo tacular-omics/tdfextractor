@@ -12,8 +12,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from serenipy import Ms2Spectra
-from tdfpy import PandasTdf, get_mobility_collapsed_spectrum, timsdata_connect
-from tdfpy.timsdata import oneOverK0ToCCSforMz
+from tdfpy import PandasTdf, get_mobility_collapsed_spectrum, ook0_to_ccs, timsdata_connect
 from tqdm import tqdm
 
 from .constants import PROTON_MASS
@@ -338,12 +337,12 @@ def get_tdf_df(
 
     with timsdata_connect(analysis_dir) as td:
         merged_df["OOK0"] = merged_df.apply(
-            lambda row: td.scanNumToOneOverK0(int(row["Parent"]), [row["ScanNumber"]])[0],
+            lambda row: td.scan_num_to_ook0(int(row["Parent"]), [row["ScanNumber"]])[0],
             axis=1,
         )
 
     merged_df["CCS"] = merged_df.apply(
-        lambda row: oneOverK0ToCCSforMz(row["OOK0"], int(row["Charge"]), row["MonoisotopicMz"]),
+        lambda row: ook0_to_ccs(row["OOK0"], int(row["Charge"]), row["MonoisotopicMz"]),
         axis=1,
     )
 
@@ -464,7 +463,7 @@ def get_ms2_dda_content(
                 if "Pressure" in precursor_row:
                     ms2_spectra.info["Pressure"] = str(round(float(precursor_row["Pressure"]), 4))
 
-                ook0_range = td.scanNumToOneOverK0(
+                ook0_range = td.scan_num_to_ook0(
                     int(precursor_row["Id_Frame"]),
                     [float(ms2_spectra.scan_begin or 0), float(ms2_spectra.scan_end or 0)],
                 )
@@ -637,7 +636,7 @@ def get_ms2_prm_content(
             ms2_spectra.scan_begin = int(row["ScanNumBegin"])
             ms2_spectra.scan_end = int(row["ScanNumEnd"])
 
-            ook0_range = td.scanNumToOneOverK0(
+            ook0_range = td.scan_num_to_ook0(
                 int(row["Frame"]),
                 [float(ms2_spectra.scan_begin or 0), float(ms2_spectra.scan_end or 0)],
             )
