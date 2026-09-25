@@ -12,6 +12,6 @@ Key rules:
    `from_namespace` copies by name.
 3. MS2 and MGF writers are DDA-only; DIA/PRM go through `write_mzml_file` only.
 4. tdfpy has broken its API across majors (2.0 centroiding, 3.0 removed
-   `readPasefMsMs`). The code targets tdfpy 4 (`tdfpy>=4.0,<5`); check `uv.lock`
+   `readPasefMsMs`, 5.0 snake_case renames). The code targets tdfpy 5 (`tdfpy>=5.0,<6`); check `uv.lock`
    before relying on a tdfpy call.
 5. Do not bump `__version__`, tag, or publish; the tacular-omics overseer releases.

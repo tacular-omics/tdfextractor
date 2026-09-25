@@ -2,4 +2,6 @@
 Constants used in the tdfextractor package.
 """
 
-PROTON_MASS = 1.007276466
+from tdfpy.constants import PROTON_MASS
+
+__all__ = ["PROTON_MASS"]

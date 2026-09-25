@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Changed
+- Requires `tdfpy>=5.0,<6` (was `>=4.0,<5`). Adapted to its renames:
+  `TimsData.scanNumToOneOverK0` -> `scan_num_to_ook0`,
+  `tdfpy.timsdata.oneOverK0ToCCSforMz` -> `tdfpy.ook0_to_ccs`, `Frame.time` -> `Frame.rt`,
+  and the `MergePeaksCentroider` keywords `mz_tolerance_type` / `im_tolerance_type` ->
+  `mz_tolerance_unit` / `im_tolerance_unit`. tdfextractor's own `MzmlArgs` fields and
+  `--centroid-*-tolerance-type` flags keep their names.
+- `tdfextractor.constants.PROTON_MASS` is `tdfpy.constants.PROTON_MASS`, the full
+  CODATA 2018 value `1.007276466621` (was truncated to `1.007276466`). Neutral and
+  M+H precursor masses move by at most 6.2e-10 Da per charge.
 
 ## [0.4.2] - 2026-09-23
 ### Added
